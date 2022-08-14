@@ -49,7 +49,6 @@ class Server:
             buffer = message[total:]
             client.send(buffer)
             total+=len(buffer)
-        print(len(message),total)
 
     def recvFile(self, client, filename, client_public_key, user_settings, userID, command_uuid, size, from_folder=False):
         total=0
@@ -258,7 +257,6 @@ class Server:
             ###########3
 
             p = Path(item_to_download).stat()
-#            modification=str(datetime.datetime.fromtimestamp(int(p.st_mtime)))
             now=str(datetime.datetime.now())
             modification=modification.split()
             now=now.split()
@@ -355,5 +353,14 @@ class Server:
 
         self.Initialize(host,port)
 
+if len(sys.argv)==2:
+    host, port = sys.argv[1:]
+    Server(host, sys.argv[1])
 
-s = Server("localhost", sys.argv[1])
+elif len(sys.argv)==1:
+    if sys.argv[1]=="--help":
+        print("\nArchon\n\nUsage: Archon <address> <port>")
+    else:
+        print("Invalid options. Please use --help option.")
+else:
+    print("Invalid options. Please use --help option.")
