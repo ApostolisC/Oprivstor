@@ -617,13 +617,11 @@ class Panel(QMainWindow):
 
         nameLabel = QLabel('Username',self)
         self.nameLineEdit = QLineEdit(self)
-        self.nameLineEdit.setText("apostolis")
         nameLabel.setBuddy(self.nameLineEdit)
 
         passwordLabel = QLabel('&Password',self)
         self.passwordLineEdit = QLineEdit(self)
         self.passwordLineEdit.setEchoMode(QLineEdit.Password)
-        self.passwordLineEdit.setText("apostolis")
         passwordLabel.setBuddy(self.passwordLineEdit)
 
         self.serverMessage = QTextEdit()
