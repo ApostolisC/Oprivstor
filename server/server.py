@@ -353,11 +353,11 @@ class Server:
 
         self.Initialize(host,port)
 
-if len(sys.argv)==2:
+if len(sys.argv[1:])==2:
     host, port = sys.argv[1:]
     Server(host, sys.argv[1])
 
-elif len(sys.argv)==1:
+elif len(sys.argv)==2:
     if sys.argv[1]=="--help":
         print("\nArchon\n\nUsage: Archon <address> <port>")
     else:
