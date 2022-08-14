@@ -5,6 +5,12 @@ from tabulate import tabulate
 class DataBase:
 
     def __init__(self,database):
+        if not os.path.exists("database"):
+            os.mkdir("database")
+            os.mkdir(os.path.join("database","FILES"))
+            os.mkdir(os.path.join("database","DATA"))
+            os.mkdir(os.path.join("database","METADATA"))
+            
 
         database_exists=os.path.exists("database.db")
 
