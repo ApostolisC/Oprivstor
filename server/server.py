@@ -355,11 +355,11 @@ class Server:
 
 if len(sys.argv[1:])==2:
     host, port = sys.argv[1:]
-    Server(host, sys.argv[1])
+    Server(host, port)
 
 elif len(sys.argv)==2:
     if sys.argv[1]=="--help":
-        print("\nArchon\n\nUsage: Archon <address> <port>")
+        print("Archon\n\nUsage: Archon <address> <port>\n")
     else:
         print("Invalid options. Please use --help option.")
 else:
