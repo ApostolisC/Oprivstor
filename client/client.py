@@ -255,28 +255,27 @@ class Client:
 
         with py7zr.SevenZipFile(path,'r', password=str(self.master_passwd)) as a:
             with alive_bar(bar=None, spinner = "circles") as bar:
-                bar.title="Decompressing-Decrypting item"
                 bar()
-            a.extractall(path=os.path.dirname(path[:len(path)-3]))
+                bar.title="Decompressing-Decrypting item"
+                a.extractall(path=os.path.dirname(path[:len(path)-3]))
 
-        path=path[:-3]
-        path2=os.path.basename(path)
-        index=path2.index(".")
-        start=path2[:index]
-        end=path2[index:]
-        counter=0
-        while os.path.exists(dest):
-            if counter==0:
-                start=start+"(1)"
-            else:
-                start=start[:-(len(str(counter))+1)]+str(counter)+")"
-            counter+=1
-            path2="%s%s"%(start,end)
-            dest=os.path.join(parent,path2)
-            print(dest)
-            os.rename(path,os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3])))
-            path=os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3]))
-        shutil.move(path,dest)
+                path=path[:-3]
+                path2=os.path.basename(path)
+                index=path2.index(".")
+                start=path2[:index]
+                end=path2[index:]
+                counter=0
+                while os.path.exists(dest):
+                    if counter==0:
+                        start=start+"(1)"
+                    else:
+                        start=start[:-(len(str(counter))+1)]+str(counter)+")"
+                    counter+=1
+                    path2="%s%s"%(start,end)
+                    dest=os.path.join(parent,path2)
+                    os.rename(path,os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3])))
+                    path=os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3]))
+                shutil.move(path,dest)
     ########################
 
     ####Encryption
@@ -300,7 +299,6 @@ class Client:
     def decryptFile(self,file, dest, nonce):
         print("\n[+] Decrypting file...")
         nonce = bytes().fromhex(nonce)
-        print(nonce,len(nonce))
         buffer_size=1040
         with open(file, "rb") as f:
             with open(dest,"wb") as decrypted_file:
@@ -334,12 +332,11 @@ class Client:
         s.connect((sys.argv[1],int(sys.argv[2])))
         s.send(b"PASS "+self.cr.createMessage(("%s %s"%(self.username, command_id)).encode(), self.server_public_key))
 
-        data = self.cr.decryptMessage(self.getResponseFromServer(s),self.private_key).decode().split()
-        filename = ' '.join(data[:-3])
-        file_size = int(data[-3])
-        compressed = data[-2]
-        nonce = data[-1]
+        filename, file_size, compressed, nonce = self.cr.decryptMessage(self.getResponseFromServer(s),self.private_key).decode().split()
 
+
+        filename = bytes().fromhex(filename).decode()
+        file_size = int(file_size)
 
         path = os.path.join(self.settings.settings["download-folder"],filename)
 
@@ -503,19 +500,23 @@ class Client:
             else:
                 s.send(self.cr.createMessage(b"0",self.server_public_key))
 
-            print("\n[+] Initializing upload")
             with open(file_to_upload, "rb") as f:
                 start=0
                 buffer_size=1014*1024*2
                 total=0
                 with alive_bar(size) as bar:
+                    bar.title("Upload")
                     bar.text="Uploading..."
                     while start<size:
                         s.sendfile(f,start,buffer_size)
                         start+=buffer_size
                         bar(buffer_size if start<size else size-(start-buffer_size))
 
+                wait=s.recv(1024)
+                self.getFiles()
+
                 print("[+] Upload completed.")
+
         except BrokenPipeError:
             print("\n[!] Lost connection. Upload Canceled.")
         return
@@ -692,7 +693,14 @@ class Panel(QMainWindow):
 
         self.move(int(self.screen_width/2)-int(self.width()/2),int(self.screen_height/2)-int(self.height()/2))
 
+if len(sys.argv[1:])==2:
+    host, port = sys.argv[1:]
+    client=Client(host, port)
 
-
-
-client=Client(sys.argv[1],sys.argv[2])
+elif len(sys.argv)==2:
+    if sys.argv[1]=="--help":
+        print("Archon Client\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
+    else:
+        print("Invalid options. Please use --help option.")
+else:
+    print("Invalid options. Please use --help option.")
