@@ -67,17 +67,19 @@ class Server:
         else:
             return True
 
-    def sendFile(self,client,item_to_download,client_public_key, compressed, nonce):
-        with open(item_to_download, "rb") as f:
+    def sendFile(self, client, filename, compress, nonce, client_public_key):
+        with open(filename, "rb") as f:
             try:
-                size = os.path.getsize(item_to_download)
-                self.sendMessage(client,("%s %s %s %s"%(os.path.basename(item_to_download), str(size),compressed, nonce)).encode(), client_public_key)
+                size = os.path.getsize(filename)
+                filename = os.path.basename(filename).encode().hex()
+                self.sendMessage(client,("%s %s %s %s"%(filename, str(size), compress, nonce)).encode(), client_public_key)
 
                 wait = client.recv(1024)
 
                 client.sendfile(f)
 
             except Exception as e:
+                print(e)
                 return
 
     def client_response(self,client):
@@ -248,39 +250,17 @@ class Server:
             user_settings["locked-files"].append(item_to_download)
             ###########
             n=os.path.join("database/METADATA",userID,item_to_download.split("/")[-1]+".txt")
-            with open(n,"r") as md:
-                p = Path(item_to_download).stat()
-                md=md.readlines()
-                modification = md[2].strip()
-                compressed = md[-2].strip()
-                nonce = md[-1].strip()
-            ###########3
+            with open(n,"r") as f:
+                f=f.readlines()
 
-            p = Path(item_to_download).stat()
-            now=str(datetime.datetime.now())
-            modification=modification.split()
-            now=now.split()
-            modification[0]=modification[0].split("-")
-            modification[1]=modification[1].split(":")
-            now[0]=now[0].split("-")
-            now[1]=now[1].split(":")
-            res=[int(now[0][0]) - int(modification[0][0]), \
-                int(now[0][1]) - int(modification[0][1]),  \
-                int(now[0][2]) - int(modification[0][2]),  \
-                int(now[1][0]) - int(modification[1][0]), \
-                int(now[1][1]) - int(modification[1][1]),  \
-                int(now[1][2].split(".")[0]) - int(modification[1][2])]
+                compress, nonce = f[4:]
 
-            if max(res[:-1])==0 and res[-1]<2:
-                time.sleep(3-res[-1])
+                self.sendFile(client, item_to_download, compress, nonce, client_public_key)
 
-
-            self.sendFile(client, item_to_download, client_public_key, compressed, nonce)
-
-            with open(n,"w") as md2:
-                md[2]=str(datetime.datetime.now()).split(".")[0]+"\n"
-                md=''.join(md)
-                md2.write(md)
+            with open(n,"w") as f2:
+                f[2]=str(datetime.datetime.now()).split(".")[0]+"\n"
+                f=''.join(f)
+                f2.write(f)
 
 
             user_settings['active-connections'] -=1
@@ -359,7 +339,7 @@ if len(sys.argv[1:])==2:
 
 elif len(sys.argv)==2:
     if sys.argv[1]=="--help":
-        print("Archon\n\nUsage: Archon <address> <port>\n")
+        print("Archon\n\nUsage: python3 %s <address> <port>\n"%sys.argv[0])
     else:
         print("Invalid options. Please use --help option.")
 else:
