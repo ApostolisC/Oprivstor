@@ -260,7 +260,6 @@ class Server:
             self.H.removeLockedFile(item_to_download)
 
         elif command[1]=="UPLOAD":
-            self.H.printCommands()
             size = command[3]
             type = command[4]
             compress = command[5]
