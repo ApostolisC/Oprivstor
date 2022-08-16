@@ -89,7 +89,6 @@ class DataBase:
 
     def getUUID(self, username):
         result = self.cursor.execute("SELECT UUID FROM SESSIONS WHERE USERNAME = (?);",(username, )).fetchall()
-        print(result[0], result[0][0])
         return result[0][0]
 
     def createDatabase(self):
