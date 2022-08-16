@@ -97,6 +97,12 @@ class Handler:
         if not authenticated: return False
         self.db.deleteUser(name)
 
+    def getID(self, username):
+        self.db.getUserID(username)
+
+    def getUserID(self, name):
+        return self.db.getUserSettings(name)[2]
+
     def getMasterPassword(self, name,password):
         data = self.db.getUserSettings(name)
         if not data:return None,None
@@ -111,5 +117,24 @@ class Handler:
             master = self.cr.decryptAES_GCM(hash,iv,tag,master_passwd)
 
             return master,data[2]
+
     def printDatabase(self):
         self.db.printDatabase()
+
+    def printCommands(self):
+        self.db.printCommands()
+
+    def printLockedFiles(self):
+        self.db.printLockedFiles()
+
+    def addLockedFile(self, file):
+        self.db.addLockedFile(file)
+
+    def removeLockedFile(self, file):
+        self.db.removeLockedFile(file)
+
+    def addUUID(self, username, user_uuid):
+        self.db.addUUID(username, user_uuid)
+
+    def getUUID(self, username):
+        return self.db.getUUID(username)
