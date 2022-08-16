@@ -16,12 +16,6 @@ from database import DataBase
 
 from handler import Handler
 
-"""
-#FORMAT OF self.users:
-#            {'user-id': {'active': blool, 'active-connections': int, 'commands': int ,'running-commands': int , 'master_passwd': str, , 'locked-files':[], 'uuid':'command', 'uuid': 'command2'},
-#             'user-id2': {'active': bool, 'active-connections': int, 'running-commands': int, 'master_passwd': str, 'uuid':'commandX', 'uuid': 'commandY'} }
-"""
-
 class Server:
     window=None
 
@@ -50,9 +44,8 @@ class Server:
             client.send(buffer)
             total+=len(buffer)
 
-    def recvFile(self, client, filename, client_public_key, user_settings, userID, command_uuid, size, from_folder=False):
+    def recvFile(self, client, filename, size):
         total=0
-        print("Expected of size:",size)
         with open(filename, "wb") as f:
             buffer = client.recv(1024*1024)
             while True:
@@ -83,23 +76,51 @@ class Server:
                 return
 
     def client_response(self,client):
-        first_command = client.recv(1024*10).split(maxsplit=1)
-        #It can be EXCHANGE or EXECUTE
-        if not first_command[0] in (b"EXCHANGE", b"PASS"):
+        #first command must be EXCHANGE for first contact or 'EXCHANGE 0' for later contact
+        first_command = client.recv(1024*10).decode().split(maxsplit=1)
+
+        print(first_command)
+
+        if not first_command[0]=="EXCHANGE":# in (b"EXCHANGE", b"PASS"):
             client.close()
             return
 
-        if first_command[0]==b"EXCHANGE":
-            self.sendMessage(client, self.public_pem)
-            r = client.recv(1024*1024)
-            client_public_key = self.cr.getPublicFromPEM(self.cr.decryptMessage(r,self.private_key))
-            self.sendMessage(client, b"Hallo from Server ",client_public_key)
+        #################################
+        ##EXCHANGE KEYS WITH CLIENT
+        self.sendMessage(client, self.public_pem)
+        client_public_key = self.cr.getPublicFromPEM(self.cr.decryptMessage(client.recv(1024*1024),self.private_key))
+        #################################
+
+        if len(first_command)==1: # first contact
+            uuid_ = str(uuid.uuid4())
+            self.sendMessage(client, ("Hallo from Server %s"%uuid_).encode(),client_public_key)
+
         else:
-            command = self.cr.decryptMessage(first_command[1], self.private_key).decode().split()
-            userID = DataBase("database.db").getUserID(command[0])
-            command_uuid = command[1]
-            self.executeCommand(userID, command_uuid,client)
+            client.send(self.cr.createMessage(b"0", client_public_key))
+#            self.sendMessage(client, b"0" ,client_public_key)
+        ##########################################
+
+            data = self.cr.decryptMessage(client.recv(1024), self.private_key).decode().split()
+            command_uuid = data[0]
+            username = data[1]
+            command = ' '.join(data[1:])
+
+
+            user_uuid = self.H.getUUID(username)
+
+
+            if user_uuid==command_uuid:
+                client.send(self.cr.createMessage(b"0", client_public_key))
+            else:
+                client.send(self.cr.createMessage(b"1", client_public_key))
+                client.close()
+                return
+
+            userID = DataBase("database.db").getUserID(username)
+            self.executeCommand(userID, command_uuid,client, client_public_key, command)
             return
+
+
 
         self.H = Handler()
         #Authentication loop
@@ -157,12 +178,10 @@ class Server:
                     break
 
         #If user managed to log into his account, the loop will break knowing we can execute commands
-        # IF USER WANTS TO LIST HIS FILES, THIS ACTION WILL TAKE PLACE HERE.
-        # FOR EVERY OTHER ACTION (EG DOWNLOAD, UPLOAD) WE WILL CREATE A UUID AND SAVE THE UUID WITH THE COMMAND ON A DICTIONARY
-        # THIS IS BC WE DONT WANT TO BLOCK OTHER ACTIONS. USER MAY WANT TO LIST OTHER FILES WHILE DOWNLOADING.
-        # SO WE CANT MESS WITH THE DOWNLOAD STREAM SENDING DATA
+        # IF USER WANTS TO LIST HIS FILES, THIS ACTION WILL TAKE PLACE HERE ON THIS THREAD
         masterPassword,userID = self.H.getMasterPassword(username, password)
-        self.users[userID] = {'active':True, "active-connections": 1,"commands":0, "running-commands":0, "master_passwd": masterPassword, "locked-files":[], "client-public-key":client_public_key}
+
+        self.H.addUUID(username, uuid_)
         cpath = os.path.join("database","FILES",userID)
         while True:
             try:
@@ -207,28 +226,7 @@ class Server:
                             self.sendMessage(client,buffer, client_public_key)
                             buffer=b""
                     self.sendMessage(client, buffer, client_public_key) if buffer else self.sendMessage(client, b"", client_public_key)
-                elif command[0] == "DOWNLOAD":
-                    item_to_download = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
-                    if item_to_download in self.users[userID]["locked-files"]:
-                        self.sendMessage(client,b"!File '%s' is locked because another action is performed on it.\nYou can cancel that action and try again."%item_to_download.encode(), client_public_key)
-                        continue
 
-                    command_uuid = str(uuid.uuid4())
-                    self.users[userID][command_uuid] = ' '.join(command)
-                    self.users[userID]["commands"] +=1
-                    self.sendMessage(client,command_uuid.encode(), client_public_key)
-                    continue
-
-                elif command[0] == "UPLOAD":
-                    item_to_upload = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
-                    if item_to_upload in self.users[userID]["locked-files"]:
-                        self.sendMessage(client,b"!File is locked because another action is performed on it.\nYou can cancel that action and try again.", client_public_key)
-                        continue
-                    command_uuid = str(uuid.uuid4())
-                    self.users[userID][command_uuid] = ' '.join(command)
-                    self.users[userID]["commands"] +=1
-                    self.sendMessage(client,command_uuid.encode(), client_public_key)
-                    continue
                 else:
                     client.close()
                     return
@@ -236,19 +234,18 @@ class Server:
                 client.close()
                 return
 
-    def executeCommand(self,userID, command_uuid, client):
+    def executeCommand(self,userID, command_uuid, client, client_public_key, command=None):
         cpath = os.path.join("database","FILES",userID)
-        user_settings = self.users[userID]
-        command = user_settings[command_uuid].split()
-        master_passwd = user_settings["master_passwd"]
-        user_settings['active-connections'] +=1
-        user_settings['running-commands'] +=1
-        client_public_key = self.users[userID]['client-public-key']
-        #private_key = self.users[userID]['server-private-key']
-        if command[0] == "DOWNLOAD":
-            item_to_download = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
-            user_settings["locked-files"].append(item_to_download)
-            ###########
+
+        command=command.split()
+
+        userID = self.H.getUserID(command[0])
+
+        if command[1] == "DOWNLOAD":
+            item_to_download = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[2]).decode()))
+
+            self.H.addLockedFile(item_to_download)
+
             n=os.path.join("database/METADATA",userID,item_to_download.split("/")[-1]+".txt")
             with open(n,"r") as f:
                 f=f.readlines()
@@ -262,38 +259,26 @@ class Server:
                 f=''.join(f)
                 f2.write(f)
 
+            self.H.removeLockedFile(item_to_download)
 
-            user_settings['active-connections'] -=1
-            user_settings['running-commands'] -=1
-            user_settings['locked-files'].remove(item_to_download)
-            self.users[userID]["commands"] -=1
-            user_settings.pop(command_uuid)
+        elif command[1]=="UPLOAD":
+            self.H.printCommands()
+            size = command[3]
+            type = command[4]
+            compress = command[5]
+            nonce = command[6]
+            filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[2]).decode()))
 
-        elif command[0]=="UPLOAD":
-            size = command[2]
-            type = command[3]
-            compress = command[4]
-            nonce = command[5]
-            print("nonce:",nonce)
-            filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
-
-            user_settings["locked-files"].append(filename)
             if os.path.exists(filename):
                 client.send(self.cr.createMessage(b"1", client_public_key))
             else:
                 client.send(self.cr.createMessage(b"0", client_public_key))
             verification = self.cr.decryptMessage(client.recv(1024*10), self.private_key).decode()
             if verification=="1":
-                user_settings['active-connections'] -=1
-                user_settings['running-commands'] -=1
-                user_settings['locked-files'].remove(filename)
-                self.users[userID]["commands"] -=1
-                user_settings.pop(command_uuid)
                 return
             if type=="FILE":
-                res = self.recvFile(client, filename, client_public_key, user_settings, userID, command_uuid, int(size))
+                res = self.recvFile(client, filename, int(size))
                 if not res:
-                    print("not res")
                     return
                 client.send(self.cr.createMessage(b'0',client_public_key))
                 with open(os.path.join("database/METADATA",userID,filename.split("/")[-1]+".txt"),"w") as f:
@@ -301,16 +286,9 @@ class Server:
                     modification_date = datetime.datetime.fromtimestamp(int(p.st_mtime))
                     creation_date = datetime.datetime.fromtimestamp(int(p.st_ctime))
                     f.write("%s\n%s\n%s\n%s\n%s\n%s"%(type, size, str(modification_date), str(creation_date),compress,nonce))
-            else:
-                filename=filename+".zip"
-                self.recvFile(client, filename, client_public_key, user_settings, userID, command_uuid, int(size),True)
-                with ZipFile(filename, 'r') as zip_ref:
-                    zip_ref.extractall(cpath)
-            user_settings['active-connections'] -=1
-            user_settings['running-commands'] -=1
-            user_settings['locked-files'].remove(filename)
-            self.users[userID]["commands"] -=1
-            user_settings.pop(command_uuid)
+
+        else:
+            print("unknown")
 
     def Initialize(self, host, port):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -327,7 +305,6 @@ class Server:
 
     def __init__(self,host,port):
         self.H = Handler()
-        self.users = {}
         self.cr = Cryptography()
         self.private_key,self.public_key, self.public_pem = self.cr.createRSAKeysWithPem()
 
