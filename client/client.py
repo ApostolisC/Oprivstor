@@ -124,15 +124,32 @@ class Client:
         self.private_key,public_key, self.public_pem = self.cr.createRSAKeysWithPem()
     def warmDataBaseEngine(self):
         self.db = db("database")
-    def exchangeKeysWithServer(self):
-        self.s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        self.s.connect((self.server,int(self.server_port)))
-        self.s.send(b"EXCHANGE")
-        self.server_public_key = self.cr.getPublicFromPEM(self.getResponseFromServer(exchange_mode=True))
-        self.s.send(self.cr.createMessage(self.public_pem, self.server_public_key))
-        response = self.getResponseFromServer()
-        greeting=self.cr.decryptMessage(response, self.private_key).decode()
-        self.greeting=greeting
+    def exchangeKeysWithServer(self, main_connection=True):
+        s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        s.connect((self.server,int(self.server_port)))
+
+        s.send(("EXCHANGE %s"%('' if main_connection else "0")).encode())
+
+        server_public_key = self.cr.getPublicFromPEM(self.getResponseFromServer(socket=s, exchange_mode=True))
+
+        s.send(self.cr.createMessage(self.public_pem, server_public_key))
+
+
+        if main_connection:
+            self.s=s
+            self.server_public_key=server_public_key
+
+            response = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key).decode().split()
+
+            self.greeting=' '.join(response[:-1])
+            self.command_uuid = response[-1]
+            return self.command_uuid
+        else:
+            s.recv(1024)
+            return s, server_public_key
+
+
+
     ##########################
 
     ####LOGIN & SIGNUP SECTION
@@ -173,7 +190,8 @@ class Client:
     def getResponseFromServer(self, socket=False, exchange_mode=False, items=None):
         if not socket: socket=self.s
         if not exchange_mode:
-            size = self.cr.decryptMessage(bytes().fromhex(socket.recv(1024*1024).decode()), self.private_key)
+            r=socket.recv(1024*1024)
+            size = self.cr.decryptMessage(bytes().fromhex(r.decode()), self.private_key)
             to_send = self.cr.createMessage(b"0", self.server_public_key)
         else:
             size = bytes().fromhex(socket.recv(1024).decode())
@@ -243,21 +261,21 @@ class Client:
 
         with py7zr.SevenZipFile(tmp, "w", password=str(self.master_passwd)) as a:
             with alive_bar(bar=None, spinner = "circles") as bar:
-                bar.title="Compressing-Encrypting item"
                 bar()
                 a.writeall(path,basepath)
 
         return '%s/%s.7z'%(self.settings.settings["temp-folder"],basepath)
 
     def decompressFile(self,path,dest):
-        print("\n[+] Decompressing and Decrypting to:",dest)
         parent=os.path.dirname(dest)
-
+        to_remove = path
         with py7zr.SevenZipFile(path,'r', password=str(self.master_passwd)) as a:
             with alive_bar(bar=None, spinner = "circles") as bar:
                 bar()
-                bar.title="Decompressing-Decrypting item"
+                bar.title="Decompressing - Decrypting"
+
                 a.extractall(path=os.path.dirname(path[:len(path)-3]))
+                shutil.move(os.path.join(os.path.dirname(path),a.getnames()[0]),path[:-3])
 
                 path=path[:-3]
                 path2=os.path.basename(path)
@@ -275,7 +293,9 @@ class Client:
                     dest=os.path.join(parent,path2)
                     os.rename(path,os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3])))
                     path=os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3]))
+                bar.title="Decompressing - Decrypting Done"
                 shutil.move(path,dest)
+        os.remove(to_remove)
     ########################
 
     ####Encryption
@@ -297,13 +317,16 @@ class Client:
         return tmp_file, nonce.hex()
 
     def decryptFile(self,file, dest, nonce):
-        print("\n[+] Decrypting file...")
+        print("\n[+]Decrypting...")
         nonce = bytes().fromhex(nonce)
+        # Encrpyt will use 1024 buffer but chacha20poly1305 will generate and a tag of size 16
+        # so 1024 + 16
+        size = os.path.getsize(file)
         buffer_size=1040
         with open(file, "rb") as f:
             with open(dest,"wb") as decrypted_file:
-                with alive_bar(os.path.getsize(file), spinner = "circles") as bar:
-                    bar.text("Decrypting...")
+                with alive_bar(size, spinner = "circles") as bar:
+                    bar.text="Decrypting file..."
                     data = f.read(buffer_size)
                     while data:
                         decrypted = self.cr.decryptChaCha20Poly1305(data, self.master_passwd, nonce)
@@ -311,63 +334,69 @@ class Client:
                         bar(buffer_size)
                         data = f.read(buffer_size)
 
+        os.remove(file)
+
+
+
     #####Download File
     def downloadFile(self,id):
-        file_info = self.db.getFileNameByID(id)[0]
-        filename, type = file_info[1:3]
+        s=None
+        try:
+            file_info = self.db.getFileNameByID(id)[0]
+            filename, type = file_info[1:3]
 
-        command = ("DOWNLOAD %s"%(filename.encode().hex())).encode()
+            command = ("DOWNLOAD %s"%(filename.encode().hex()))
+            message = "%s %s %s"%(self.command_uuid, self.username, command)
 
-        enc_msg=self.cr.createMessage(command, self.server_public_key)
-        self.s.send(enc_msg)
-        command_id = self.cr.decryptMessage(self.getResponseFromServer(self.s),self.private_key).decode()
+            s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-        if not command_id:
-            return
-        if command_id[0]=="!":
-            print("\n[!] Action Failed:", command_id[1:])
-            return
+            s.send(self.cr.createMessage(message.encode(), server_public_key))
 
-        s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((sys.argv[1],int(sys.argv[2])))
-        s.send(b"PASS "+self.cr.createMessage(("%s %s"%(self.username, command_id)).encode(), self.server_public_key))
+            result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
 
-        filename, file_size, compressed, nonce = self.cr.decryptMessage(self.getResponseFromServer(s),self.private_key).decode().split()
+            if result=="1":
+                return
+
+            filename, file_size, compressed, nonce = self.cr.decryptMessage(self.getResponseFromServer(s),self.private_key).decode().split()
 
 
-        filename = bytes().fromhex(filename).decode()
-        file_size = int(file_size)
+            filename = bytes().fromhex(filename).decode()
+            file_size = int(file_size)
 
-        path = os.path.join(self.settings.settings["download-folder"],filename)
+            path = os.path.join(self.settings.settings["download-folder"],filename)
 
-        if compressed:
-            tmp_file="%s/%s.7z"%(self.settings.settings["temp-folder"],os.path.basename(path))
-        else:
-            tmp_file="%s/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(path))
+            if compressed:
+                tmp_file="%s/Archon/%s.7z"%(self.settings.settings["temp-folder"],os.path.basename(path))
+            else:
+                tmp_file="%s/Archon/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(path))
 
-        s.send(self.cr.createMessage(b"0", self.server_public_key))
+            s.send(self.cr.createMessage(b"0", self.server_public_key))
 
-        with open(tmp_file,"wb") as f:
-            print("\n[+] Downloading to:",path)
-            total=0
-            with alive_bar(file_size) as bar:
-                bar.text="Downloading..."
-                buffer_size = 1024*1024*8
-                buffer = s.recv(buffer_size)
-                while buffer and total<file_size:
-                    total+=len(buffer)
-                    f.write(buffer)
-
-                    bar(len(buffer))
-                    if total==file_size:
-                        break
+            with open(tmp_file,"wb") as f:
+                print("\n[+] Downloading to:",path)
+                total=0
+                with alive_bar(file_size) as bar:
+                    bar.text="Downloading..."
+                    buffer_size = 1024*1024*8
                     buffer = s.recv(buffer_size)
-        print("\n[+] Download completed")
-        s.close()
-        if compressed=="True":
-            self.decompressFile(tmp_file, path)
-        else:
-            self.decryptFile(tmp_file, path,nonce)
+                    while buffer and total<file_size:
+                        total+=len(buffer)
+                        f.write(buffer)
+
+                        bar(len(buffer))
+                        if total==file_size:
+                            break
+                        buffer = s.recv(buffer_size)
+            s.close()
+            if compressed=="True":
+                self.decompressFile(tmp_file, path)
+            else:
+                self.decryptFile(tmp_file, path,nonce)
+
+        except KeyboardInterrupt:
+            if s:
+                s.close()
+            pass
 
     ########################
 
@@ -467,31 +496,30 @@ class Client:
                 nonce=None
             else:
                 file_to_upload, nonce = self.encryptFile(file_to_upload)
-                #nonce=None
                 size = os.path.getsize(file_to_upload)
 
         encoded_filename=os.path.basename(os.path.normpath(name)).encode().hex()
-        command= ("UPLOAD %s %s %s %s %s"%(encoded_filename, str(size), "FILE", compress, "False" if compress else nonce)).encode()
-        enc_msg=self.cr.createMessage(command, self.server_public_key)
-        self.s.send(enc_msg)
-        response = self.cr.decryptMessage(self.getResponseFromServer(self.s),self.private_key).decode()
 
-        if not response:
-            return
-        if response[0]=="!":
-            print("\n[!] Action Failed:", response[1:])
-            return
-        else:
-            command_id = response
+        command= ("UPLOAD %s %s %s %s %s"%(encoded_filename, str(size), "FILE", compress, "False" if compress else nonce))
+        message = "%s %s %s"%(self.command_uuid, self.username, command)
 
-        s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
+
+        s.send(self.cr.createMessage(message.encode(), server_public_key))
+
+        result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+
+        if result=="1":
+            print("\n[-] Action failed")
+            s.close()
+            return
+
+
         try:
-            s.connect((self.server,int(self.server_port)))
-            s.send(b"PASS "+self.cr.createMessage(("%s %s"%(self.username, command_id)).encode(), self.server_public_key))
 
             response = self.cr.decryptMessage(s.recv(1024*10), self.private_key).decode()
             if response=="1":
-                ans=input("[>] File already exists. Overwrite? [y/n]: ").lower()
+                ans=input("\n[>] File already exists. Overwrite? [y/n]: ").lower()
                 if ans not in ("y","yes"):
                     print("[-] Abort.")
                     s.send(self.cr.createMessage(b"1",self.server_public_key))
@@ -500,13 +528,12 @@ class Client:
             else:
                 s.send(self.cr.createMessage(b"0",self.server_public_key))
 
+            print("\n[+] Uploading...")
             with open(file_to_upload, "rb") as f:
                 start=0
                 buffer_size=1014*1024*2
                 total=0
                 with alive_bar(size) as bar:
-                    bar.title("Upload")
-                    bar.text="Uploading..."
                     while start<size:
                         s.sendfile(f,start,buffer_size)
                         start+=buffer_size
@@ -515,7 +542,7 @@ class Client:
                 wait=s.recv(1024)
                 self.getFiles()
 
-                print("[+] Upload completed.")
+                print("\n[+] Upload completed.")
 
         except BrokenPipeError:
             print("\n[!] Lost connection. Upload Canceled.")
@@ -567,7 +594,10 @@ class Client:
                 elif len(command)==2:
                     pass
                     if command[0]=="download":
-                        self.downloadFile(int(command[1]))
+                        try:
+                            self.downloadFile(int(command[1]))
+                        except ValueError:
+                            print("\n[!] Invalid id")
                     else:
                         print("\nUnknown command.")
                 elif len(command)==3:
@@ -602,7 +632,6 @@ class Panel(QMainWindow):
     def __init__(self,greeting, client, size, action="Login"):
         super(Panel, self).__init__()
         self.username=None
-        self.password=None
         self.ready=False
         self.client=client
 
@@ -668,15 +697,15 @@ class Panel(QMainWindow):
         self.close()
 
     def validateCredentials(self):
-        self.username, self.password=self.nameLineEdit.text(),self.passwordLineEdit.text()
+        self.username = self.nameLineEdit.text()
         if not self.username:
             QMessageBox.critical(self, 'Action Failed', "Username can't be null", buttons=QMessageBox.Ok,)
 
-        elif not self.password:
+        elif not self.passwordLineEdit.text():
             QMessageBox.critical(self, 'Action Failed', "Password can't be null", buttons=QMessageBox.Ok,)
 
         else:
-            result = self.client.LoginPanel(self.username, self.password, self.action)
+            result = self.client.LoginPanel(self.username, self.passwordLineEdit.text(), self.action)
             if result==True:
                 self.Exit()
             else:
@@ -693,14 +722,4 @@ class Panel(QMainWindow):
 
         self.move(int(self.screen_width/2)-int(self.width()/2),int(self.screen_height/2)-int(self.height()/2))
 
-if len(sys.argv[1:])==2:
-    host, port = sys.argv[1:]
-    client=Client(host, port)
-
-elif len(sys.argv)==2:
-    if sys.argv[1]=="--help":
-        print("Archon Client\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
-    else:
-        print("Invalid options. Please use --help option.")
-else:
-    print("Invalid options. Please use --help option.")
+client=Client(sys.argv[1],sys.argv[2])
