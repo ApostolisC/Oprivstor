@@ -79,8 +79,6 @@ class Server:
         #first command must be EXCHANGE for first contact or 'EXCHANGE 0' for later contact
         first_command = client.recv(1024*10).decode().split(maxsplit=1)
 
-        print(first_command)
-
         if not first_command[0]=="EXCHANGE":# in (b"EXCHANGE", b"PASS"):
             client.close()
             return
