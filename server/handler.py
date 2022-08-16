@@ -1,140 +1,127 @@
 import os
-import shutil
-import uuid
+import sqlite3
+from tabulate import tabulate
 
-from argon2 import hash_password_raw
+class DataBase:
 
-from database import DataBase
-from Cryptography import Cryptography
-
-
-class Handler:
-    def __init__(self):
-        self.db = DataBase("database.db")
-        self.cr = Cryptography()
-        #self.purgeDatabases()
-    def purgeDatabase(self):
-        if os.path.exists(os.path.join("database","DATA")):
-            shutil.rmtree(os.path.join("database","DATA"))
-            os.mkdir(os.path.join("database","DATA"))
-        if os.path.exists(os.path.join("database","FILES")):
-            shutil.rmtree(os.path.join("database","FILES"))
+    def __init__(self,database):
+        if not os.path.exists("database"):
+            os.mkdir("database")
             os.mkdir(os.path.join("database","FILES"))
+            os.mkdir(os.path.join("database","DATA"))
+            os.mkdir(os.path.join("database","METADATA"))
 
-    def createUserFolder(self):
-        user_id = uuid.uuid4().hex
-        path = os.path.join("database","DATA",user_id)
-        while os.path.exists(path):
-            user_id = uuid_uuid4().hex
-            path = os.path.join("database","DATA",user_id)
-        os.mkdir(path)
-        os.mkdir(os.path.join("database","FILES",user_id))
-        os.mkdir(os.path.join("database","METADATA",user_id))
-        return user_id
 
-    def changePassword(self,name,password,new_password):
-        user_settings = self.db.getUserSettings(name)
-        new_hash = self.cr.createHash(new_password)
-        new_user_id = self.createUserFolder()
-        settings = (name, new_hash, new_user_id)
+        database_exists=os.path.exists("database.db")
 
-        master_passwd = self.getMasterPassword(name,password)
-        with open(os.path.join("database","DATA",new_user_id,"salt"),"wb") as salt_file, open(os.path.join("database","DATA",new_user_id,"master_passwd"),"wb") as master_passwd_file, open(os.path.join("database","DATA",new_user_id,"iv_file"),"wb") as iv_file, open(os.path.join("database","DATA",new_user_id,"tag"),"wb") as tag_file:
-            salt = os.urandom(16)
-            iv = os.urandom(16)
-            hash = hash_password_raw(hash_len=16, password=new_password.encode(), salt=salt).hex()
+        self.sqliteConnection = sqlite3.connect(database, check_same_thread=False)
 
-            encrypted_master_passwd, tag = self.cr.encryptAES_GCM(hash, iv, master_passwd)
+        self.cursor = self.sqliteConnection.cursor()
 
-            salt_file.write(salt)
-            iv_file.write(iv)
-            master_passwd_file.write(encrypted_master_passwd)
-            tag_file.write(tag)
+        if not database_exists:
+            self.createDatabase()
 
-        self.db.passwordResetProtocol(name,new_hash,new_user_id)
-        shutil.rmtree(os.path.join("database","DATA",user_settings[2]))
+    def getRecords(self):
+        return self.cursor.execute("SELECT * FROM USERS").fetchall()
 
-    def createUser(self, name,password):
-        if self.db.userExists(name): return False
+    def userExists(self, user):
+        return self.cursor.execute("SELECT * FROM USERS WHERE Name=?",(user,)).fetchall()
+        #self.sqliteConnection.commit()
 
-        hash = self.cr.createHash(password)
+    def getUserSettings(self,user):
+        try:
+            return self.cursor.execute("SELECT * FROM USERS WHERE Name=?",(user,)).fetchall()[0]
 
-        user_id = self.createUserFolder()
+        except IndexError:
+            return None
 
-        settings = (name, hash, user_id,0,0,0,0)
+    def getUserID(self,user):
+        try:
+            return self.cursor.execute("SELECT * FROM USERS WHERE Name=?",(user,)).fetchall()[0][2]
+        except IndexError:
+            return None
 
-        with open(os.path.join("database","DATA",user_id,"salt"),"wb") as salt_file, open(os.path.join("database","DATA",user_id,"master_passwd"),"wb") as master_passwd_file, open(os.path.join("database","DATA",user_id,"iv_file"),"wb") as iv_file, open(os.path.join("database","DATA",user_id,"tag"),"wb") as tag_file:
-            salt = os.urandom(16)
-            iv = os.urandom(16)
-            hash = hash_password_raw(hash_len=16, password=password.encode(), salt=salt).hex()
-            master_passwd = os.urandom(32)
-
-            encrypted_master_passwd, tag = self.cr.encryptAES_GCM(hash, iv, master_passwd)
-
-            salt_file.write(salt)
-            iv_file.write(iv)
-            master_passwd_file.write(encrypted_master_passwd)
-            tag_file.write(tag)
-
-        self.db.addUserToDatabase(settings)
-        """
-        print("\nNEW USER (%s,%s)"%(name,password))
-        print("HASH: %s", hash)
-        print("USER_ID:", user_id)
-        print("\nSettings for Master Password:\n")
-        print("SALT:",salt)
-        print("IV:",iv)
-        print("ENCRYPTED MASTER PASSWORD:",encrypted_master_passwd)
-        print("MASTER PASSWORD:",master_passwd)
-        """
-        return True
-
-    def authenticate(self,name,password):
-        return self.cr.validateHash(name,password)
-
-    def deleteUser(self,name,password):
-        authenticated = self.authenticate(name,password)
-        if not authenticated: return False
-        self.db.deleteUser(name)
-
-    def getID(self, username):
-        self.db.getUserID(username)
-
-    def getUserID(self, name):
-        return self.db.getUserSettings(name)[2]
-
-    def getMasterPassword(self, name,password):
-        data = self.db.getUserSettings(name)
-        if not data:return None,None
-        authenticated = self.authenticate(data[1],password)
-        if not authenticated: return None,None
-        user_id = data[2]
-        with open(os.path.join("database","DATA",user_id,"salt"),"rb") as salt_file, open(os.path.join("database","DATA",user_id,"master_passwd"),"rb") as master_passwd_file, open(os.path.join("database","DATA",user_id,"iv_file"),"rb") as iv_file, open(os.path.join("database","DATA",user_id,"tag"),"rb") as tag_file:
-            salt, iv,master_passwd, tag = salt_file.read(), iv_file.read(), master_passwd_file.read(), tag_file.read()
-
-            hash = hash_password_raw(hash_len=16, password=password.encode(), salt=salt).hex()
-
-            master = self.cr.decryptAES_GCM(hash,iv,tag,master_passwd)
-
-            return master,data[2]
-
-    def printDatabase(self):
-        self.db.printDatabase()
-
-    def printCommands(self):
-        self.db.printCommands()
-
-    def printLockedFiles(self):
-        self.db.printLockedFiles()
+    def deleteUser(self,name):
+        self.cursor.execute("DELETE FROM USERS WHERE Name=?",(name,))
+        self.sqliteConnection.commit()
 
     def addLockedFile(self, file):
-        self.db.addLockedFile(file)
+        self.cursor.execute("INSERT INTO LOCKED_FILES VALUES (?);",(file,))
+        self.sqliteConnection.commit()
 
-    def removeLockedFile(self, file):
-        self.db.removeLockedFile(file)
+    def removeLockedFile(self,file):
+        self.cursor.execute("DELETE FROM LOCKED_FILES WHERE FILE=?",(file,))
+        self.sqliteConnection.commit()
 
-    def addUUID(self, username, user_uuid):
-        self.db.addUUID(username, user_uuid)
+    def printDatabase(self):
+        users = self.cursor.execute("SELECT * FROM USERS").fetchall()
+        users.insert(0,["Username","Hash","User ID"])
+        print(tabulate(users, headers='firstrow'))
+        print()
+
+    def printLockedFiles(self):
+        files = self.cursor.execute("SELECT * FROM LOCKED_FILES").fetchall()
+        files.insert(0,["File"])
+        print(tabulate(files, headers='firstrow'))
+        print()
+
+    def printCommands(self):
+        commands = self.cursor.execute("SELECT * FROM LOCKED_FILES").fetchall()
+        commands.insert(0,["Name", "PUBLIC_KEY"])
+        print(tabulate(commands, headers='firstrow'))
+        print()
+
+    def addUserToDatabase(self, s):
+        self.cursor.execute("INSERT INTO USERS VALUES (?,?,?);",(s[0],s[1],s[2],))
+        self.cursor.execute("INSERT INTO SESSIONS VALUES (?,null);",(s[0],))
+        self.sqliteConnection.commit()
+
+    def addUUID(self, username, uuid_):
+        self.cursor.execute("""
+        UPDATE SESSIONS
+
+        SET UUID = ?
+
+        WHERE USERNAME = ?;
+
+        """,(uuid_,username,))
+        self.sqliteConnection.commit()
 
     def getUUID(self, username):
-        return self.db.getUUID(username)
+        result = self.cursor.execute("SELECT UUID FROM SESSIONS WHERE USERNAME = (?);",(username, )).fetchall()
+        print(result[0], result[0][0])
+        return result[0][0]
+
+    def createDatabase(self):
+        query = """CREATE TABLE USERS (
+
+                    Name VARCHAR(255),
+
+                    Hash VARCHAR(255),
+
+                    Id   varchar(255)
+
+                    ); """
+        query2 = """CREATE TABLE SESSIONS (
+
+                    USERNAME VARCHAR(255),
+
+                    UUID VARCHAR(255)
+
+                    ); """
+
+        query3 = """CREATE TABLE LOCKED_FILES (
+
+                    FILE VARCHAR(255)
+
+                    ); """
+        self.cursor.execute(query)
+        self.cursor.execute(query2)
+        self.cursor.execute(query3)
+        self.sqliteConnection.commit()
+
+
+
+    def passwordResetProtocol(self,name, new_hash,new_user_id):
+        self.cursor.execute("UPDATE USERS SET Hash=?, Id=? WHERE Name=?",(new_hash,new_user_id,name,))
+        self.sqliteConnection.commit()
