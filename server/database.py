@@ -10,11 +10,11 @@ class DataBase:
             os.mkdir(os.path.join("database","FILES"))
             os.mkdir(os.path.join("database","DATA"))
             os.mkdir(os.path.join("database","METADATA"))
-            
+
 
         database_exists=os.path.exists("database.db")
 
-        self.sqliteConnection = sqlite3.connect(database)
+        self.sqliteConnection = sqlite3.connect(database, check_same_thread=False)
 
         self.cursor = self.sqliteConnection.cursor()
 
@@ -45,16 +45,52 @@ class DataBase:
         self.cursor.execute("DELETE FROM USERS WHERE Name=?",(name,))
         self.sqliteConnection.commit()
 
+    def addLockedFile(self, file):
+        self.cursor.execute("INSERT INTO LOCKED_FILES VALUES (?);",(file,))
+        self.sqliteConnection.commit()
+
+    def removeLockedFile(self,file):
+        self.cursor.execute("DELETE FROM LOCKED_FILES WHERE FILE=?",(file,))
+        self.sqliteConnection.commit()
+
     def printDatabase(self):
         users = self.cursor.execute("SELECT * FROM USERS").fetchall()
         users.insert(0,["Username","Hash","User ID"])
         print(tabulate(users, headers='firstrow'))
         print()
 
+    def printLockedFiles(self):
+        files = self.cursor.execute("SELECT * FROM LOCKED_FILES").fetchall()
+        files.insert(0,["File"])
+        print(tabulate(files, headers='firstrow'))
+        print()
+
+    def printCommands(self):
+        commands = self.cursor.execute("SELECT * FROM LOCKED_FILES").fetchall()
+        commands.insert(0,["Name", "PUBLIC_KEY"])
+        print(tabulate(commands, headers='firstrow'))
+        print()
 
     def addUserToDatabase(self, s):
         self.cursor.execute("INSERT INTO USERS VALUES (?,?,?);",(s[0],s[1],s[2],))
+        self.cursor.execute("INSERT INTO SESSIONS VALUES (?,null);",(s[0],))
         self.sqliteConnection.commit()
+
+    def addUUID(self, username, uuid_):
+        self.cursor.execute("""
+        UPDATE SESSIONS
+
+        SET UUID = ?
+
+        WHERE USERNAME = ?;
+
+        """,(uuid_,username,))
+        self.sqliteConnection.commit()
+
+    def getUUID(self, username):
+        result = self.cursor.execute("SELECT UUID FROM SESSIONS WHERE USERNAME = (?);",(username, )).fetchall()
+        print(result[0], result[0][0])
+        return result[0][0]
 
     def createDatabase(self):
         query = """CREATE TABLE USERS (
@@ -66,7 +102,22 @@ class DataBase:
                     Id   varchar(255)
 
                     ); """
+        query2 = """CREATE TABLE SESSIONS (
+
+                    USERNAME VARCHAR(255),
+
+                    UUID VARCHAR(255)
+
+                    ); """
+
+        query3 = """CREATE TABLE LOCKED_FILES (
+
+                    FILE VARCHAR(255)
+
+                    ); """
         self.cursor.execute(query)
+        self.cursor.execute(query2)
+        self.cursor.execute(query3)
         self.sqliteConnection.commit()
 
 
