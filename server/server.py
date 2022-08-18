@@ -51,7 +51,7 @@ class Server:
             while True:
                 f.write(buffer)
                 total+=len(buffer)
-                if not buffer or total==size:
+                if not buffer:
                     break
                 buffer=client.recv(1024*1024)
         if total<size:
@@ -95,14 +95,13 @@ class Server:
 
         else:
             client.send(self.cr.createMessage(b"0", client_public_key))
-#            self.sendMessage(client, b"0" ,client_public_key)
         ##########################################
-
             data = self.cr.decryptMessage(client.recv(1024), self.private_key).decode().split()
             command_uuid = data[0]
             username = data[1]
-            command = ' '.join(data[1:])
+            command = data[2:]
 
+            userID = self.H.getUserID(username)
 
             user_uuid = self.H.getUUID(username)
 
@@ -114,7 +113,7 @@ class Server:
                 client.close()
                 return
 
-            userID = DataBase("database.db").getUserID(username)
+
             self.executeCommand(userID, command_uuid,client, client_public_key, command)
             return
 
@@ -232,18 +231,16 @@ class Server:
                 client.close()
                 return
 
-    def executeCommand(self,userID, command_uuid, client, client_public_key, command=None):
+    def executeCommand(self,userID, command_uuid, client, client_public_key, command):
         cpath = os.path.join("database","FILES",userID)
 
-        command=command.split()
-
-        userID = self.H.getUserID(command[0])
-
-        if command[1] == "DOWNLOAD":
-            item_to_download = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[2]).decode()))
+        #needs check on index
+        if command[0] == "DOWNLOAD":
+            item_to_download = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
 
             self.H.addLockedFile(item_to_download)
 
+            ###########
             n=os.path.join("database/METADATA",userID,item_to_download.split("/")[-1]+".txt")
             with open(n,"r") as f:
                 f=f.readlines()
@@ -259,25 +256,22 @@ class Server:
 
             self.H.removeLockedFile(item_to_download)
 
-        elif command[1]=="UPLOAD":
-            size = command[3]
-            type = command[4]
-            compress = command[5]
-            nonce = command[6]
-            filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[2]).decode()))
+        elif command[0]=="UPLOAD":
+            #size = command[3]
+            type = command[2]
+            compress = command[3]
+            filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
 
-            if os.path.exists(filename):
-                client.send(self.cr.createMessage(b"1", client_public_key))
-            else:
-                client.send(self.cr.createMessage(b"0", client_public_key))
-            verification = self.cr.decryptMessage(client.recv(1024*10), self.private_key).decode()
-            if verification=="1":
-                return
+            #client.send(self.cr.createMessage(b"0", client_public_key))
+
+            size, nonce = self.cr.decryptMessage(client.recv(1024*10), self.private_key).decode().split()
+            size=int(size)
+
+            client.send(self.cr.createMessage(b"0", client_public_key))
             if type=="FILE":
                 res = self.recvFile(client, filename, int(size))
                 if not res:
                     return
-                client.send(self.cr.createMessage(b'0',client_public_key))
                 with open(os.path.join("database/METADATA",userID,filename.split("/")[-1]+".txt"),"w") as f:
                     p = Path(filename).stat()
                     modification_date = datetime.datetime.fromtimestamp(int(p.st_mtime))
