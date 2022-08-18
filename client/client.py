@@ -303,20 +303,21 @@ class Client:
         print("\n[+] Encrypting %s..."%file)
         buffer_size=1024
         tmp_file="%s/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(file))
+        size = os.path.getsize(file)
         with open(file, "rb") as f:
             with open(tmp_file,"wb") as encrypted_file:
                 nonce = os.urandom(12)
                 data = f.read(buffer_size)
-                with alive_bar(os.path.getsize(file), spinner = "circles") as bar:
+                with alive_bar(size, manual=True,spinner = "circles") as bar:
                     bar.text("Encrypting...")
                     while data:
                         encrypted = self.cr.encryptFileChaCha20Poly1305(data, self.master_passwd, nonce)
                         encrypted_file.write(encrypted)
-                        bar(buffer_size)
+                        bar(f.tell()/size)
                         data = f.read(buffer_size)
         return tmp_file, nonce.hex()
 
-    def decryptFile(self,file, dest, nonce):
+    def decryptFile(self, file,dest,nonce):
         print("\n[+]Decrypting...")
         nonce = bytes().fromhex(nonce)
         # Encrpyt will use 1024 buffer but chacha20poly1305 will generate and a tag of size 16
@@ -325,18 +326,16 @@ class Client:
         buffer_size=1040
         with open(file, "rb") as f:
             with open(dest,"wb") as decrypted_file:
-                with alive_bar(size, spinner = "circles") as bar:
+                with alive_bar(size, manual=True,spinner = "circles") as bar:
                     bar.text="Decrypting file..."
                     data = f.read(buffer_size)
                     while data:
                         decrypted = self.cr.decryptChaCha20Poly1305(data, self.master_passwd, nonce)
                         decrypted_file.write(decrypted)
-                        bar(buffer_size)
+                        bar(f.tell()/(size))
                         data = f.read(buffer_size)
 
         os.remove(file)
-
-
 
     #####Download File
     def downloadFile(self,id):
