@@ -307,12 +307,14 @@ class Client:
             with open(tmp_file,"wb") as encrypted_file:
                 nonce = os.urandom(12)
                 data = f.read(buffer_size)
-                with alive_bar(os.path.getsize(file), spinner = "circles") as bar:
+                with alive_bar(os.path.getsize(file), manual=True,spinner = "circles") as bar:
                     bar.text("Encrypting...")
+                    progress=0
                     while data:
                         encrypted = self.cr.encryptFileChaCha20Poly1305(data, self.master_passwd, nonce)
                         encrypted_file.write(encrypted)
-                        bar(buffer_size)
+                        progress+=buffer_size
+                        bar(progress/os.path.getsize(file))
                         data = f.read(buffer_size)
         return tmp_file, nonce.hex()
 
@@ -325,13 +327,15 @@ class Client:
         buffer_size=1040
         with open(file, "rb") as f:
             with open(dest,"wb") as decrypted_file:
-                with alive_bar(size, spinner = "circles") as bar:
+                with alive_bar(size, manual=True,spinner = "circles") as bar:
                     bar.text="Decrypting file..."
                     data = f.read(buffer_size)
+                    progress=0
                     while data:
                         decrypted = self.cr.decryptChaCha20Poly1305(data, self.master_passwd, nonce)
                         decrypted_file.write(decrypted)
-                        bar(buffer_size)
+                        progress+=buffer_size
+                        bar(progress/(size))
                         data = f.read(buffer_size)
 
         os.remove(file)
