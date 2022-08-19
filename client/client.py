@@ -4,7 +4,7 @@ import shutil
 
 import uuid
 import getpass
-
+import time
 import json
 
 from zipfile import ZipFile
@@ -13,20 +13,19 @@ import py7zr
 import tempfile
 from tabulate import tabulate
 
-
 from pathvalidate import is_valid_filename, sanitize_filename
-from alive_progress import alive_bar
 
 import socket
 import threading
 
+import subprocess
+
 from PyQt5.QtWidgets import QWidget, QFileDialog, QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QGridLayout, QMessageBox
 
-from PyQt5.QtGui import QFontMetrics
+from PyQt5.QtGui import QFontMetrics, QFont
 
 from Cryptography import Cryptography
 from database import DataBase as db
-
 
 class FileDialog(QWidget):
 
@@ -114,9 +113,7 @@ class ReadSettings():
         total, used, free = shutil.disk_usage("/")
         return total // (2**30), used // (2**30), free // (2**30)
 
-
-
-class Client:
+class Client():
     ##########################
     ####Cryptography
     def warmCryptographyEngine(self):
@@ -217,6 +214,32 @@ class Client:
         self.loadFilesToDatabase(response)
     #########################
 
+    ###DELETE FILE ON SERVER
+    def deleteFile(self, id):
+        file = self.db.getFileNameByID(id)[0][1]
+        print(file)
+        if not file:
+            print("\n[-] File doesn't exist.")
+            return
+        else:
+            encoded_filename=os.path.basename(file).encode().hex()
+            message = "%s %s DELETE %s"%(self.command_uuid, self.username, encoded_filename)
+
+            s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
+
+            s.send(self.cr.createMessage(message.encode(), server_public_key))
+
+            result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+
+            s.close()
+            if result[0]=="1":
+                print(result[1:])
+            elif result==1:
+                print("\n[!] File doesn't exist")
+            else:
+                print("\n[+] File '%s' deleted."%file)
+            return
+
     ####Store files to database
     def loadFilesToDatabase(self, data):
         self.db.purgeDatabase()
@@ -235,7 +258,7 @@ class Client:
         if not records:
             records = self.db.getFiles()
         records.insert(0, ['ID','Name','Type','Size','Modification Date','Creation Date', "Compressed"])
-        print(tabulate(records, headers='firstrow'))
+        print(tabulate(records, headers='firstrow',tablefmt="fancy_grid",maxcolwidths=[None, 25,None,None,None,None,None]))
     #########################
 
     ####Usage manual
@@ -247,78 +270,112 @@ class Client:
         help.append(("",""))
         help.append(("download <id>","To download a file"))
         help.append(("upload","To upload a file"))
+        help.append(("delete <id>","To delete a file"))
         help.append(("",""))
         help.append(("files","To list files on server"))
         help.append(("sort <parameter> <order>","files command sorted by (parameters: name, type, size, mod_date, create_date) and (order: a, d (asc, desc))"))
-        print(tabulate(help, headers='firstrow'))
+        help.append(("",""))
+        help.append(("jobs","To see all running actions"))
+        help.append(("cancel <id>","To cancel a job with <id>"))
+        help.append(("history","To see completed jobs"))
+        print(tabulate(help, headers='firstrow',tablefmt="fancy_grid",maxcolwidths=[None, 40]))
     ########################
 
     ####Compression
-    def compressFile(self,path,basepath):
-        tmp='%s/%s.7z'%(self.settings.settings["temp-folder"],basepath)
-        print("\n[+] Compressing and Encrypting to:",tmp)
+    def decompressStatusUpdate(self, running, job_id, th=False):
+        if not th:
+            a=threading.Thread(target=self.decompressStatusUpdate, args=(running, job_id, True,))
+            a.daemon=True
+            a.start()
+            return
+        p = ["\t|","\t/","\t-","\t\\"]
+        i=0
+        while running[0]:
+            if i==4:
+                i=0
+            self.jobs[job_id][3] = p[i]
+            i+=1
+            time.sleep(0.1)
 
+        self.jobs[job_id][3] = "Done"
+        running[1]=True
+
+    def compressFile(self,path,basepath, job_id):
+        tmp='%s/%s.7z'%(self.settings.settings["temp-folder"],basepath)
 
         with py7zr.SevenZipFile(tmp, "w", password=str(self.master_passwd)) as a:
-            with alive_bar(bar=None, spinner = "circles") as bar:
-                bar()
-                a.writeall(path,basepath)
+            running = [True,False]
+            self.decompressStatusUpdate(running, job_id)
+            a.writeall(path,basepath)
+
+        running[0]=False
+        while not running[1]:
+            time.sleep(0.1)
 
         return '%s/%s.7z'%(self.settings.settings["temp-folder"],basepath)
 
-    def decompressFile(self,path,dest):
+    def decompressFile(self,path,dest, job_id):
         parent=os.path.dirname(dest)
         to_remove = path
+
+
         with py7zr.SevenZipFile(path,'r', password=str(self.master_passwd)) as a:
-            with alive_bar(bar=None, spinner = "circles") as bar:
-                bar()
-                bar.title="Decompressing - Decrypting"
+            running = [True,False]
+            self.decompressStatusUpdate(running, job_id)
 
-                a.extractall(path=os.path.dirname(path[:len(path)-3]))
-                shutil.move(os.path.join(os.path.dirname(path),a.getnames()[0]),path[:-3])
+            a.extractall(path=os.path.dirname(path[:len(path)-3]))
+            shutil.move(os.path.join(os.path.dirname(path),a.getnames()[0]),path[:-3])
 
-                path=path[:-3]
-                path2=os.path.basename(path)
-                index=path2.index(".")
-                start=path2[:index]
-                end=path2[index:]
-                counter=0
-                while os.path.exists(dest):
-                    if counter==0:
-                        start=start+"(1)"
-                    else:
-                        start=start[:-(len(str(counter))+1)]+str(counter)+")"
-                    counter+=1
-                    path2="%s%s"%(start,end)
-                    dest=os.path.join(parent,path2)
-                    os.rename(path,os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3])))
-                    path=os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3]))
-                bar.title="Decompressing - Decrypting Done"
-                shutil.move(path,dest)
+            path=path[:-3]
+            path2=os.path.basename(path)
+            index=path2.index(".")
+            start=path2[:index]
+            end=path2[index:]
+            counter=0
+            while os.path.exists(dest):
+                if counter==0:
+                    start=start+"(1)"
+                else:
+                    start=start[:-(len(str(counter))+1)]+str(counter)+")"
+                counter+=1
+                path2="%s%s"%(start,end)
+                dest=os.path.join(parent,path2)
+                os.rename(path,os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3])))
+                path=os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3]))
+
+            self.jobs[job_id][4]=dest
+            shutil.move(path,dest)
+
         os.remove(to_remove)
+        running[0]=False
+        while not running[1]:
+            time.sleep(0.1)
+        self.old_jobs.append(self.jobs.pop(job_id))
     ########################
 
     ####Encryption
-    def encryptFile(self, file):
-        print("\n[+] Encrypting %s..."%file)
+    def encryptFile(self, file, job_id):
         buffer_size=1024
-        tmp_file="%s/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(file))
-        size = os.path.getsize(file)
+        tmp_file="%s/Archon/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(file))
         with open(file, "rb") as f:
+            size = os.path.getsize(file)
             with open(tmp_file,"wb") as encrypted_file:
                 nonce = os.urandom(12)
                 data = f.read(buffer_size)
-                with alive_bar(size, manual=True,spinner = "circles") as bar:
-                    bar.text("Encrypting...")
-                    while data:
-                        encrypted = self.cr.encryptFileChaCha20Poly1305(data, self.master_passwd, nonce)
-                        encrypted_file.write(encrypted)
-                        bar(f.tell()/size)
-                        data = f.read(buffer_size)
+                while data and self.jobs[job_id][-1]:
+                    encrypted = self.cr.encryptFileChaCha20Poly1305(data, self.master_passwd, nonce)
+                    encrypted_file.write(encrypted)
+                    self.jobs[job_id][3]=str(int((f.tell()/size)*100))+"%"
+                    data = f.read(buffer_size)
+
+        if not self.jobs[job_id][-1]:
+            return None,None
+
+        self.jobs[job_id][3]="Done"
+        time.sleep(1)
         return tmp_file, nonce.hex()
 
-    def decryptFile(self, file,dest,nonce):
-        print("\n[+]Decrypting...")
+    def decryptFile(self,file, dest, nonce, job_id):
         nonce = bytes().fromhex(nonce)
         # Encrpyt will use 1024 buffer but chacha20poly1305 will generate and a tag of size 16
         # so 1024 + 16
@@ -326,23 +383,33 @@ class Client:
         buffer_size=1040
         with open(file, "rb") as f:
             with open(dest,"wb") as decrypted_file:
-                with alive_bar(size, manual=True,spinner = "circles") as bar:
-                    bar.text="Decrypting file..."
+                data = f.read(buffer_size)
+                while data and self.jobs[job_id][-1]:
+                    decrypted = self.cr.decryptChaCha20Poly1305(data, self.master_passwd, nonce)
+                    decrypted_file.write(decrypted)
+                    self.jobs[job_id][3]=str(int((f.tell()/size)*100))+"%"
                     data = f.read(buffer_size)
-                    while data:
-                        decrypted = self.cr.decryptChaCha20Poly1305(data, self.master_passwd, nonce)
-                        decrypted_file.write(decrypted)
-                        bar(f.tell()/(size))
-                        data = f.read(buffer_size)
 
-        os.remove(file)
+        if not self.jobs[job_id][-1]:
+            self.jobs[job_id][2]="Canceled"
+            self.jobs[job_id][3]="Terminated"
+            self.jobs[job_id][-1] = "\n[-] Canceled command with id: %s"%job_id
+        else:
+            os.remove(file)
+            self.jobs[job_id][3]="Done"
+        time.sleep(1)
+
 
     #####Download File
-    def downloadFile(self,id):
-        s=None
+    def downloadFile(self,id, msg):
         try:
-            file_info = self.db.getFileNameByID(id)[0]
+            try:
+                file_info = self.db.getFileNameByID(id)[0]
+            except IndexError:
+                msg[0]="\n[!] Invalid ID."
+                return
             filename, type = file_info[1:3]
+
 
             command = ("DOWNLOAD %s"%(filename.encode().hex()))
             message = "%s %s %s"%(self.command_uuid, self.username, command)
@@ -371,53 +438,79 @@ class Client:
 
             s.send(self.cr.createMessage(b"0", self.server_public_key))
 
-            with open(tmp_file,"wb") as f:
-                print("\n[+] Downloading to:",path)
-                total=0
-                with alive_bar(file_size) as bar:
-                    bar.text="Downloading..."
-                    buffer_size = 1024*1024*8
-                    buffer = s.recv(buffer_size)
-                    while buffer and total<file_size:
-                        total+=len(buffer)
-                        f.write(buffer)
 
-                        bar(len(buffer))
-                        if total==file_size:
-                            break
-                        buffer = s.recv(buffer_size)
+            job_id=self.getJobID()
+            progress = [job_id, "DOWNLOAD","(1/2) Downloading", "0%", path, True]
+            self.jobs[job_id] = progress
+
+            msg[0]="\n[+] Downloading %s"% filename
+
+            with open(tmp_file,"wb") as f:
+                total=0
+                buffer_size = 1024*1024*8
+                buffer = s.recv(buffer_size)
+                while buffer and total<file_size and self.jobs[job_id][-1]:
+                    total+=len(buffer)
+                    f.write(buffer)
+                    self.jobs[job_id][3]=str(int((total/file_size)*100))+"%"
+                    if total==file_size:
+                        break
+                    buffer = s.recv(buffer_size)
+
+            if not self.jobs[job_id][-1]:
+                self.jobs[job_id][2] = "Canceled"
+                self.jobs[job_id][3] = "Terminated"
+                self.jobs[job_id][-1] = "\n[-] Canceled command with id: %s"%job_id
+                time.sleep(1)
+                self.old_jobs.append(self.jobs.pop(job_id))
+                return
+
             s.close()
             if compressed=="True":
-                self.decompressFile(tmp_file, path)
+                self.jobs[job_id] = [job_id, "DOWNLOAD","(2/2) Decompressing - Decrypting", "-", path, True]
+                self.decompressFile(tmp_file, path, job_id)
             else:
-                self.decryptFile(tmp_file, path,nonce)
+                self.jobs[job_id] = [job_id, "DOWNLOAD","(2/2) Decrypting","0%", path, True]
+                self.decryptFile(tmp_file, path,nonce, job_id)
 
-        except KeyboardInterrupt:
-            if s:
-                s.close()
-            pass
+            if not self.jobs[job_id][-1]:
+                self.jobs[job_id][-1] = "\n[-] Unable to cancel command. Download completed"
 
-    ########################
+            self.jobs[job_id][2] = "Downloaded"
+            self.old_jobs.append(self.jobs.pop(job_id))
+
+        except Exception as e:
+            print(e)
+            self.jobs[job_id][2] = "ERROR"
+            self.jobs[job_id][3] = "Incomplete"
+            self.old_jobs.append(self.jobs.pop(job_id))
+            #self.old_jobs.append(self.jobs.pop(job_id))
+
 
     #####Upload File
     def printUploadOptionsHelp(self):
         print()
         help=[["Command","Description"]]
         help.append(("help/h/?","Print this"))
-        help.append(("compress <yes/no>","To compress the file before upload (default yes)."))
+        help.append(("",""))
         help.append(("name <name>","To upload the file under different name."))
+        help.append(("compress <yes/no>","To compress the file before upload (default yes)."))
+        help.append(("overwrite","<yes/no>. Available if file already exists (default no)."))
+        help.append(("",""))
         help.append(("show options","To print current settings for the upload."))
         help.append(("cancel","To return to the main menu."))
         help.append(("send","To send the file, begin the upload."))
-        print(tabulate(help, headers='firstrow'))
+        print(tabulate(help, headers='firstrow',tablefmt="fancy_grid", maxcolwidths=[None, 49]))
 
-    def printCurrentUploadSettings(self,compress, file, name):
+    def printCurrentUploadSettings(self,compress, file, name, exists, overwrite):
         print()
         help=[["Setting","Value"]]
         help.append(("Item to upload:",file))
         help.append(("Save under the name:",name))
         help.append(("Compress before upload:",str(compress)))
-        print(tabulate(help, headers='firstrow'))
+        if exists:
+            help.append(("File already exists.\nOverwrite:",overwrite))
+        print(tabulate(help, headers='firstrow',tablefmt="fancy_grid"))
 
     def filterFileName(self, file):
         valid = is_valid_filename(file)
@@ -432,15 +525,18 @@ class Client:
         return file
 
     def getUploadFileOptions(self, file):
+        os.system("clear")
         compress = True
         name = file
+        exists = self.db.fileExists(os.path.basename(file))
+        to_overwrite=False
+
         print("\n[+] File '%s' has been selected to be uploaded."%file)
         print("\n[Note]: Use help for upload options")
-        self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name))
+        self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name),exists, to_overwrite)
         #self.printUploadOptionsHelp()
         ans=input("\n[Upload]: %s> "%file).split()
-        if not ans:ans=['']
-        while ans[0] not in ("cancel", "send"):
+        while True:
             if ans[0]=="name":
                 _name = ' '.join(ans[1:])
                 _name = self.filterFileName(_name)
@@ -448,6 +544,8 @@ class Client:
                     print("[!] Invalid filename. Please try again.")
                 else:
                     name = _name
+                    exists = self.db.fileExists(os.path.basename(_name))
+                    to_overwrite=False
                     print("\nSave as -->",name)
             elif len(ans)==1:
                 if ans[0] in ("help","?","h"):
@@ -455,9 +553,15 @@ class Client:
                 elif ans[0]=="cancel":
                     return False
                 elif ans[0]=="send":
-                    break
+                    if exists:
+                        if not to_overwrite:
+                            print("\n[-] Unable to upload file. File already exists. Please overwrite or upload under different name")
+                        else:
+                            break
+                    else:
+                        break
                 else:
-                    print("Unknown command.")
+                    print("\nUnknown command.")
             elif len(ans)==2:
                 if ans[0]=="compress":
                     if ans[1] not in ("yes","no"):
@@ -466,40 +570,37 @@ class Client:
                         compress = True if ans[1]=="yes" else False
                         print("\nCompress -->",compress)
                 elif ans[0]=="show" and ans[1]=="options":
-                    self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name))
+                    self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name), exists, to_overwrite)
+                elif ans[0]=="overwrite":
+                    if exists:
+                        if not ans[1] in ("yes","no"):
+                            print("[-] Invalid overwrite options\n")
+                        else:
+                            to_overwrite = True if ans[1]=="yes" else False
+                        print("\nOverwrite -->",to_overwrite)
+                    else:
+                        print("Unknown command.")
                 else:
                     print("Unknown command.")
             else:
                 print("Unknown command.")
             ans=input("\n[Upload]: %s> "%file).split()
-            if not ans:ans=['']
         return (True, compress, name)
 
-    def uploadFile(self):
-        file_to_upload = self.getFile()
-        if not file_to_upload:
-            return
-        options = self.getUploadFileOptions(file_to_upload)
-        if not options: return
+    def uploadFile(self, file_to_upload, options, msg):
         compress, name = options[1:]
 
+        job_id=self.getJobID()
+        progress = [job_id, "UPLOAD","(1/2) Compressing - Encrypting" if compress else "(1/2) Encrypting", "0%", file_to_upload, True]
+        self.jobs[job_id] = progress
+
+        msg[0]="\n[+] Uploading %s"% file_to_upload
+
         file_type="DIR" if os.path.isdir(file_to_upload) else "FILE"
-        if file_type=="FILE":
-            if compress:
-                compressed_file = self.compressFile(file_to_upload,os.path.basename(file_to_upload))
-                print()
-
-                size = os.path.getsize(compressed_file)
-
-                file_to_upload = compressed_file
-                nonce=None
-            else:
-                file_to_upload, nonce = self.encryptFile(file_to_upload)
-                size = os.path.getsize(file_to_upload)
 
         encoded_filename=os.path.basename(os.path.normpath(name)).encode().hex()
 
-        command= ("UPLOAD %s %s %s %s %s"%(encoded_filename, str(size), "FILE", compress, "False" if compress else nonce))
+        command= ("UPLOAD %s %s %s"%(encoded_filename, "FILE", compress))
         message = "%s %s %s"%(self.command_uuid, self.username, command)
 
         s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
@@ -513,41 +614,116 @@ class Client:
             s.close()
             return
 
+        if file_type=="FILE":
+            if compress:
+                compressed_file = self.compressFile(file_to_upload,os.path.basename(file_to_upload), job_id)
+
+                size = os.path.getsize(compressed_file)
+
+                file_to_upload = compressed_file
+                nonce=None
+            else:
+                file_to_upload, nonce = self.encryptFile(file_to_upload, job_id)
+
+                if file_to_upload:
+                    size = os.path.getsize(file_to_upload)
+
+            if not file_to_upload:
+                self.jobs[job_id][2] = "Canceled"
+                self.jobs[job_id][3]="Terminated"
+                self.jobs[job_id][-1]="\n[-] Canceled command with id: %d"%job_id
+                time.sleep(1)
+                self.old_jobs.append(self.jobs.pop(job_id))
+                return
+
 
         try:
 
-            response = self.cr.decryptMessage(s.recv(1024*10), self.private_key).decode()
-            if response=="1":
-                ans=input("\n[>] File already exists. Overwrite? [y/n]: ").lower()
-                if ans not in ("y","yes"):
-                    print("[-] Abort.")
-                    s.send(self.cr.createMessage(b"1",self.server_public_key))
-                    return
-                s.send(self.cr.createMessage(b"0",self.server_public_key))
-            else:
-                s.send(self.cr.createMessage(b"0",self.server_public_key))
+            s.send(self.cr.createMessage(("%s %s"%(str(size), nonce)).encode(),self.server_public_key))
 
-            print("\n[+] Uploading...")
+
+            self.jobs[job_id][2] = "Uploading"
+
+            wait=s.recv(1024)
             with open(file_to_upload, "rb") as f:
-                start=0
                 buffer_size=1014*1024*2
-                total=0
-                with alive_bar(size) as bar:
-                    while start<size:
-                        s.sendfile(f,start,buffer_size)
-                        start+=buffer_size
-                        bar(buffer_size if start<size else size-(start-buffer_size))
+                while f.tell()<size and self.jobs[job_id][-1]:
+                    s.sendfile(f,f.tell(),buffer_size)
+                    self.jobs[job_id][3]=str(int((f.tell()/size)*100))+"%"
 
-                wait=s.recv(1024)
-                self.getFiles()
+                if not self.jobs[job_id][-1]:
+                    self.jobs[job_id][-1] = "\n[-] Canceled command with id: %d"%job_id
+                    self.jobs[job_id][2] = "Canceled"
+                    self.jobs[job_id][3]="Terminated"
+                    s.close()
+                else:
+                    self.jobs[job_id][3]="..."
+                    self.jobs[job_id][2]="Retrieving Files"
+                    self.getFiles()
+                    self.jobs[job_id][2] = "Uploaded"
+                    self.jobs[job_id][3]="Done"
 
-                print("\n[+] Upload completed.")
+                time.sleep(1)
+                self.old_jobs.append(self.jobs.pop(job_id))
+
 
         except BrokenPipeError:
             print("\n[!] Lost connection. Upload Canceled.")
+            self.jobs[job_id][2] = "ERROR"
+            self.jobs[job_id][3]="Incomplete"
+            self.old_jobs.append(self.jobs.pop(job_id))
         return
 
-    #########################
+    def uploadFilePreload(self, msg):
+        file_to_upload = self.getFile()
+        if not file_to_upload:
+            return
+        options = self.getUploadFileOptions(file_to_upload)
+        if not options:
+            msg[0]="\n[-] Abort."
+            return
+
+        a=threading.Thread(target=self.uploadFile, args=(file_to_upload, options, msg))
+        a.daemon=True
+        a.start()
+
+    ########################
+    def printOldJobs(self):
+        if not self.old_jobs:
+            print("\n[-] History is empty.")
+            return
+        print("\nOld records:\n")
+        status=[["ID","Action","Status","Progress", "Path"]]
+        for job in self.old_jobs:
+            status.append(job[:-1])
+        print(tabulate(status, headers="firstrow",tablefmt="fancy_grid",maxcolwidths=[None, None,None,None,25]))
+
+    def printJobs(self):
+        try:
+            if not self.jobs:
+                return
+            status=[["ID","Action","Status","Progress", "Path"]]
+            for job in self.jobs:
+                status.append(self.jobs[job][:-1])
+            print(tabulate(status, headers="firstrow",tablefmt="fancy_grid",maxcolwidths=[None, None,None,None,25]))
+        except:return
+
+    def printJobsLoop(self):
+        try:
+            while self.jobs:
+                os.system("clear")
+                self.printJobs()
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            os.system("clear")
+            self.printJobs()
+            return
+        finally:
+            os.system("clear")
+            self.printJobs()
+            print("\nNo running commands.")
+    ########################
+
     #####Parse file
     def getFile(self):
         #app = QApplication(sys.argv)
@@ -555,20 +731,27 @@ class Client:
         return fd.getResult()
     #########################
 
+    ##get new job id
+    def getJobID(self):
+        self.jobID+=1
+        return self.jobID
+
+
     def __init__(self,server,port):
         self.server, self.server_port = server, port
         self.settings = ReadSettings()
         self.authenticated=False
 
+
+        self.jobID=0
+        self.jobs = {}
+        self.old_jobs=[]
+
         self.warmCryptographyEngine()
         self.warmDataBaseEngine()
         self.exchangeKeysWithServer()
 
-        app=QApplication(sys.argv)
-        size=app.primaryScreen()
-        window = Panel(self.greeting, self, size)
-        window.show()
-        app.exec_()
+        self.window = Panel(self.greeting, self)
 
         if not self.authenticated: sys.exit()
 
@@ -587,16 +770,46 @@ class Client:
                         self.getFiles()
                         self.printDatabase()
                     elif command[0]=="upload":
-                        self.uploadFile()
+                        msg=[""]
+                        self.uploadFilePreload(msg)
+
+                        while not msg[0]:
+                            time.sleep(0.1)
+                        print(msg[0])
+
+                    elif command[0]=="jobs":
+                        self.printJobsLoop()
+                    elif command[0]=="history":
+                        self.printOldJobs()
                     else:
                         print("\nUnknown command.")
                 elif len(command)==2:
-                    pass
                     if command[0]=="download":
                         try:
-                            self.downloadFile(int(command[1]))
+                            msg=[""]
+                            a=threading.Thread(target=self.downloadFile,args=(int(command[1]),msg,))
+                            a.daemon=True
+                            a.start()
+                            while not msg[0]:
+                                time.sleep(0.1)
+                            print(msg[0])
+
                         except ValueError:
                             print("\n[!] Invalid id")
+                    elif command[0]=="cancel":
+                        try:
+                            msg=[""]
+                            to_cancel_id=int(command[1])
+                            self.jobs[to_cancel_id][-1]=False
+                            while self.jobs[to_cancel_id][-1]==False:
+                                time.sleep(0.1)
+                            print(self.jobs[to_cancel_id][-1])
+
+                        except:
+                            print("\n[!] Invalid id")
+                    elif command[0]=="delete":
+                        self.deleteFile(command[1])
+                        self.getFiles()
                     else:
                         print("\nUnknown command.")
                 elif len(command)==3:
@@ -628,11 +841,14 @@ class Client:
 
 class Panel(QMainWindow):
     authenticated=False
-    def __init__(self,greeting, client, size, action="Login"):
+    app=QApplication(sys.argv)
+    def __init__(self,greeting, client, action="Login"):
         super(Panel, self).__init__()
         self.username=None
         self.ready=False
         self.client=client
+
+        size=self.app.primaryScreen()
 
         screen = size.size()
         self.screen_width, self.screen_height = screen.width(), screen.height()
@@ -686,6 +902,10 @@ class Panel(QMainWindow):
 
 
         self.move(int(self.screen_width/2)-int(self.width()/2),int(self.screen_height/2)-int(self.height()/4))
+
+        self.show()
+        self.app.exec_()
+
 
     def changeAction(self,text):
         self.setWindowTitle("F3G %s"%text.upper())
