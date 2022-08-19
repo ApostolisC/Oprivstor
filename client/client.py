@@ -214,6 +214,32 @@ class Client():
         self.loadFilesToDatabase(response)
     #########################
 
+    ###DELETE FILE ON SERVER
+    def deleteFile(self, id):
+        file = self.db.getFileNameByID(id)[0][1]
+        print(file)
+        if not file:
+            print("\n[-] File doesn't exist.")
+            return
+        else:
+            encoded_filename=os.path.basename(file).encode().hex()
+            message = "%s %s DELETE %s"%(self.command_uuid, self.username, encoded_filename)
+
+            s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
+
+            s.send(self.cr.createMessage(message.encode(), server_public_key))
+
+            result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+
+            s.close()
+            if result[0]=="1":
+                print(result[1:])
+            elif result==1:
+                print("\n[!] File doesn't exist")
+            else:
+                print("\n[+] File '%s' deleted."%file)
+            return
+
     ####Store files to database
     def loadFilesToDatabase(self, data):
         self.db.purgeDatabase()
@@ -232,7 +258,7 @@ class Client():
         if not records:
             records = self.db.getFiles()
         records.insert(0, ['ID','Name','Type','Size','Modification Date','Creation Date', "Compressed"])
-        print(tabulate(records, headers='firstrow'))
+        print(tabulate(records, headers='firstrow',tablefmt="fancy_grid",maxcolwidths=[None, 25,None,None,None,None,None]))
     #########################
 
     ####Usage manual
@@ -244,13 +270,15 @@ class Client():
         help.append(("",""))
         help.append(("download <id>","To download a file"))
         help.append(("upload","To upload a file"))
+        help.append(("delete <id>","To delete a file"))
         help.append(("",""))
         help.append(("files","To list files on server"))
         help.append(("sort <parameter> <order>","files command sorted by (parameters: name, type, size, mod_date, create_date) and (order: a, d (asc, desc))"))
         help.append(("",""))
         help.append(("jobs","To see all running actions"))
+        help.append(("cancel <id>","To cancel a job with <id>"))
         help.append(("history","To see completed jobs"))
-        print(tabulate(help, headers='firstrow'))
+        print(tabulate(help, headers='firstrow',tablefmt="fancy_grid",maxcolwidths=[None, 40]))
     ########################
 
     ####Compression
@@ -265,11 +293,11 @@ class Client():
         while running[0]:
             if i==4:
                 i=0
-            self.jobs[job_id][2] = p[i]
+            self.jobs[job_id][3] = p[i]
             i+=1
             time.sleep(0.1)
 
-        self.jobs[job_id][2] = "Done"
+        self.jobs[job_id][3] = "Done"
         running[1]=True
 
     def compressFile(self,path,basepath, job_id):
@@ -315,31 +343,35 @@ class Client():
                 os.rename(path,os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3])))
                 path=os.path.join(os.path.dirname(path[:-3]),"%s%s"%(start,end[:-3]))
 
-            self.jobs[job_id][3]=dest
+            self.jobs[job_id][4]=dest
             shutil.move(path,dest)
 
         os.remove(to_remove)
         running[0]=False
         while not running[1]:
             time.sleep(0.1)
+        self.old_jobs.append(self.jobs.pop(job_id))
     ########################
 
     ####Encryption
     def encryptFile(self, file, job_id):
         buffer_size=1024
-        tmp_file="%s/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(file))
+        tmp_file="%s/Archon/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(file))
         with open(file, "rb") as f:
             size = os.path.getsize(file)
             with open(tmp_file,"wb") as encrypted_file:
                 nonce = os.urandom(12)
                 data = f.read(buffer_size)
-                while data:
+                while data and self.jobs[job_id][-1]:
                     encrypted = self.cr.encryptFileChaCha20Poly1305(data, self.master_passwd, nonce)
                     encrypted_file.write(encrypted)
-                    self.jobs[job_id][2]=str(int((f.tell()/size)*100))+"%"
+                    self.jobs[job_id][3]=str(int((f.tell()/size)*100))+"%"
                     data = f.read(buffer_size)
 
-        self.jobs[job_id][2]="Done"
+        if not self.jobs[job_id][-1]:
+            return None,None
+
+        self.jobs[job_id][3]="Done"
         time.sleep(1)
         return tmp_file, nonce.hex()
 
@@ -352,14 +384,19 @@ class Client():
         with open(file, "rb") as f:
             with open(dest,"wb") as decrypted_file:
                 data = f.read(buffer_size)
-                while data:
+                while data and self.jobs[job_id][-1]:
                     decrypted = self.cr.decryptChaCha20Poly1305(data, self.master_passwd, nonce)
                     decrypted_file.write(decrypted)
-                    self.jobs[job_id][2]=str(int((f.tell()/size)*100))+"%"
+                    self.jobs[job_id][3]=str(int((f.tell()/size)*100))+"%"
                     data = f.read(buffer_size)
 
-        os.remove(file)
-        self.jobs[job_id][2]="Done"
+        if not self.jobs[job_id][-1]:
+            self.jobs[job_id][2]="Canceled"
+            self.jobs[job_id][3]="Terminated"
+            self.jobs[job_id][-1] = "\n[-] Canceled command with id: %s"%job_id
+        else:
+            os.remove(file)
+            self.jobs[job_id][3]="Done"
         time.sleep(1)
 
 
@@ -402,8 +439,8 @@ class Client():
             s.send(self.cr.createMessage(b"0", self.server_public_key))
 
 
-            progress = ["DOWNLOAD","(1/2) Downloading", "0%", path]
             job_id=self.getJobID()
+            progress = [job_id, "DOWNLOAD","(1/2) Downloading", "0%", path, True]
             self.jobs[job_id] = progress
 
             msg[0]="\n[+] Downloading %s"% filename
@@ -412,28 +449,40 @@ class Client():
                 total=0
                 buffer_size = 1024*1024*8
                 buffer = s.recv(buffer_size)
-                while buffer and total<file_size:
+                while buffer and total<file_size and self.jobs[job_id][-1]:
                     total+=len(buffer)
                     f.write(buffer)
-                    self.jobs[job_id][2]=str(int((total/file_size)*100))+"%"
+                    self.jobs[job_id][3]=str(int((total/file_size)*100))+"%"
                     if total==file_size:
                         break
                     buffer = s.recv(buffer_size)
+
+            if not self.jobs[job_id][-1]:
+                self.jobs[job_id][2] = "Canceled"
+                self.jobs[job_id][3] = "Terminated"
+                self.jobs[job_id][-1] = "\n[-] Canceled command with id: %s"%job_id
+                time.sleep(1)
+                self.old_jobs.append(self.jobs.pop(job_id))
+                return
+
             s.close()
             if compressed=="True":
-                self.jobs[job_id] = ["DOWNLOAD","(2/2) Decompressing - Decrypting", "-", path]
+                self.jobs[job_id] = [job_id, "DOWNLOAD","(2/2) Decompressing - Decrypting", "-", path, True]
                 self.decompressFile(tmp_file, path, job_id)
             else:
-                self.jobs[job_id] = ["DOWNLOAD","(2/2) Decrypting","0%", path]
+                self.jobs[job_id] = [job_id, "DOWNLOAD","(2/2) Decrypting","0%", path, True]
                 self.decryptFile(tmp_file, path,nonce, job_id)
 
-            self.jobs[job_id][1] = "Downloaded"
+            if not self.jobs[job_id][-1]:
+                self.jobs[job_id][-1] = "\n[-] Unable to cancel command. Download completed"
+
+            self.jobs[job_id][2] = "Downloaded"
             self.old_jobs.append(self.jobs.pop(job_id))
 
         except Exception as e:
             print(e)
-            self.jobs[job_id][1] = "ERROR"
-            self.jobs[job_id][2] = "Incomplete"
+            self.jobs[job_id][2] = "ERROR"
+            self.jobs[job_id][3] = "Incomplete"
             self.old_jobs.append(self.jobs.pop(job_id))
             #self.old_jobs.append(self.jobs.pop(job_id))
 
@@ -446,22 +495,22 @@ class Client():
         help.append(("",""))
         help.append(("name <name>","To upload the file under different name."))
         help.append(("compress <yes/no>","To compress the file before upload (default yes)."))
-        help.append(("overwrite","<yes/no. Available if file already exists (default no)."))
+        help.append(("overwrite","<yes/no>. Available if file already exists (default no)."))
         help.append(("",""))
         help.append(("show options","To print current settings for the upload."))
         help.append(("cancel","To return to the main menu."))
         help.append(("send","To send the file, begin the upload."))
-        print(tabulate(help, headers='firstrow'))
+        print(tabulate(help, headers='firstrow',tablefmt="fancy_grid", maxcolwidths=[None, 49]))
 
-    def printCurrentUploadSettings(self,compress, file, name, exists):
+    def printCurrentUploadSettings(self,compress, file, name, exists, overwrite):
         print()
         help=[["Setting","Value"]]
         help.append(("Item to upload:",file))
         help.append(("Save under the name:",name))
         help.append(("Compress before upload:",str(compress)))
         if exists:
-            help.append(("File already exists. Overwrite:","False"))
-        print(tabulate(help, headers='firstrow'))
+            help.append(("File already exists.\nOverwrite:",overwrite))
+        print(tabulate(help, headers='firstrow',tablefmt="fancy_grid"))
 
     def filterFileName(self, file):
         valid = is_valid_filename(file)
@@ -484,7 +533,7 @@ class Client():
 
         print("\n[+] File '%s' has been selected to be uploaded."%file)
         print("\n[Note]: Use help for upload options")
-        self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name),exists)
+        self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name),exists, to_overwrite)
         #self.printUploadOptionsHelp()
         ans=input("\n[Upload]: %s> "%file).split()
         while True:
@@ -496,6 +545,7 @@ class Client():
                 else:
                     name = _name
                     exists = self.db.fileExists(os.path.basename(_name))
+                    to_overwrite=False
                     print("\nSave as -->",name)
             elif len(ans)==1:
                 if ans[0] in ("help","?","h"):
@@ -520,14 +570,14 @@ class Client():
                         compress = True if ans[1]=="yes" else False
                         print("\nCompress -->",compress)
                 elif ans[0]=="show" and ans[1]=="options":
-                    self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name), to_overwrite)
+                    self.printCurrentUploadSettings(compress, os.path.basename(file), os.path.basename(name), exists, to_overwrite)
                 elif ans[0]=="overwrite":
                     if exists:
                         if not ans[1] in ("yes","no"):
                             print("[-] Invalid overwrite options\n")
                         else:
                             to_overwrite = True if ans[1]=="yes" else False
-                        print("overwrite:",to_overwrite)
+                        print("\nOverwrite -->",to_overwrite)
                     else:
                         print("Unknown command.")
                 else:
@@ -540,8 +590,8 @@ class Client():
     def uploadFile(self, file_to_upload, options, msg):
         compress, name = options[1:]
 
-        progress = ["UPLOAD","(1/2) Compressing - Encrypting" if compress else "(1/2) Encrypting", "0%", file_to_upload]
         job_id=self.getJobID()
+        progress = [job_id, "UPLOAD","(1/2) Compressing - Encrypting" if compress else "(1/2) Encrypting", "0%", file_to_upload, True]
         self.jobs[job_id] = progress
 
         msg[0]="\n[+] Uploading %s"% file_to_upload
@@ -574,38 +624,53 @@ class Client():
                 nonce=None
             else:
                 file_to_upload, nonce = self.encryptFile(file_to_upload, job_id)
-                size = os.path.getsize(file_to_upload)
+
+                if file_to_upload:
+                    size = os.path.getsize(file_to_upload)
+
+            if not file_to_upload:
+                self.jobs[job_id][2] = "Canceled"
+                self.jobs[job_id][3]="Terminated"
+                self.jobs[job_id][-1]="\n[-] Canceled command with id: %d"%job_id
+                time.sleep(1)
+                self.old_jobs.append(self.jobs.pop(job_id))
+                return
+
 
         try:
 
             s.send(self.cr.createMessage(("%s %s"%(str(size), nonce)).encode(),self.server_public_key))
 
 
-            self.jobs[job_id][1] = "Uploading"
+            self.jobs[job_id][2] = "Uploading"
 
             wait=s.recv(1024)
             with open(file_to_upload, "rb") as f:
-                start=0
                 buffer_size=1014*1024*2
-                total=0
-                while start<size:
-                    s.sendfile(f,start,buffer_size)
-                    start+=buffer_size
-                    self.jobs[job_id][2]=str(int((start/size)*100))+"%"
+                while f.tell()<size and self.jobs[job_id][-1]:
+                    s.sendfile(f,f.tell(),buffer_size)
+                    self.jobs[job_id][3]=str(int((f.tell()/size)*100))+"%"
 
-                self.jobs[job_id][2]="..."
-                self.jobs[job_id][1]="Retrieving Files"
-                self.getFiles()
-                self.jobs[job_id][1] = "Uploaded"
-                self.jobs[job_id][2]="Done"
+                if not self.jobs[job_id][-1]:
+                    self.jobs[job_id][-1] = "\n[-] Canceled command with id: %d"%job_id
+                    self.jobs[job_id][2] = "Canceled"
+                    self.jobs[job_id][3]="Terminated"
+                    s.close()
+                else:
+                    self.jobs[job_id][3]="..."
+                    self.jobs[job_id][2]="Retrieving Files"
+                    self.getFiles()
+                    self.jobs[job_id][2] = "Uploaded"
+                    self.jobs[job_id][3]="Done"
+
                 time.sleep(1)
                 self.old_jobs.append(self.jobs.pop(job_id))
 
 
         except BrokenPipeError:
             print("\n[!] Lost connection. Upload Canceled.")
-            self.jobs[job_id][1] = "ERROR"
-            self.jobs[job_id][2]="Incomplete"
+            self.jobs[job_id][2] = "ERROR"
+            self.jobs[job_id][3]="Incomplete"
             self.old_jobs.append(self.jobs.pop(job_id))
         return
 
@@ -615,7 +680,7 @@ class Client():
             return
         options = self.getUploadFileOptions(file_to_upload)
         if not options:
-            msg[0]="\n[-] exAbort."
+            msg[0]="\n[-] Abort."
             return
 
         a=threading.Thread(target=self.uploadFile, args=(file_to_upload, options, msg))
@@ -624,17 +689,24 @@ class Client():
 
     ########################
     def printOldJobs(self):
+        if not self.old_jobs:
+            print("\n[-] History is empty.")
+            return
         print("\nOld records:\n")
-        status=[["Action","Status","Progress", "Path"]]
+        status=[["ID","Action","Status","Progress", "Path"]]
         for job in self.old_jobs:
-            status.append(job)
-        print(tabulate(status, headers="firstrow"))
+            status.append(job[:-1])
+        print(tabulate(status, headers="firstrow",tablefmt="fancy_grid",maxcolwidths=[None, None,None,None,25]))
 
     def printJobs(self):
-        status=[["Action","Status","Progress", "Path"]]
-        for job in self.jobs:
-            status.append(self.jobs[job])
-        print(tabulate(status, headers="firstrow"))
+        try:
+            if not self.jobs:
+                return
+            status=[["ID","Action","Status","Progress", "Path"]]
+            for job in self.jobs:
+                status.append(self.jobs[job][:-1])
+            print(tabulate(status, headers="firstrow",tablefmt="fancy_grid",maxcolwidths=[None, None,None,None,25]))
+        except:return
 
     def printJobsLoop(self):
         try:
@@ -705,7 +777,6 @@ class Client():
                             time.sleep(0.1)
                         print(msg[0])
 
-
                     elif command[0]=="jobs":
                         self.printJobsLoop()
                     elif command[0]=="history":
@@ -713,7 +784,6 @@ class Client():
                     else:
                         print("\nUnknown command.")
                 elif len(command)==2:
-                    pass
                     if command[0]=="download":
                         try:
                             msg=[""]
@@ -726,6 +796,20 @@ class Client():
 
                         except ValueError:
                             print("\n[!] Invalid id")
+                    elif command[0]=="cancel":
+                        try:
+                            msg=[""]
+                            to_cancel_id=int(command[1])
+                            self.jobs[to_cancel_id][-1]=False
+                            while self.jobs[to_cancel_id][-1]==False:
+                                time.sleep(0.1)
+                            print(self.jobs[to_cancel_id][-1])
+
+                        except:
+                            print("\n[!] Invalid id")
+                    elif command[0]=="delete":
+                        self.deleteFile(command[1])
+                        self.getFiles()
                     else:
                         print("\nUnknown command.")
                 elif len(command)==3:
