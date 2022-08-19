@@ -278,6 +278,24 @@ class Server:
                     creation_date = datetime.datetime.fromtimestamp(int(p.st_ctime))
                     f.write("%s\n%s\n%s\n%s\n%s\n%s"%(type, size, str(modification_date), str(creation_date),compress,nonce))
 
+        elif command[0]=="DELETE":
+                filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
+                basepath=os.path.join("database/FILES",userID)
+                path=os.path.join("database/FILES",userID, filename)
+                if not basepath in path:
+                    client.send(self.cr.createMessage(b"1Action reported", client_public_key))
+                    print("[!] Action to exploit delete command to delete below users path")
+                elif not os.path.exists(filename):
+                    client.send(self.cr.createMessage(b"1", client_public_key))
+                else:
+                    client.send(self.cr.createMessage(b"0", client_public_key))
+
+                client.close()
+
+                os.remove(path)
+                os.remove(os.path.join("database/METADATA",userID,filename.split("/")[-1]+".txt"))
+
+
         else:
             print("unknown")
 
