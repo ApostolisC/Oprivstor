@@ -277,12 +277,12 @@ class Server:
                 res = self.recvFile(client, filename, int(size))
                 if not res:
                     return
-                client.send(self.cr.createMessage(b'0',client_public_key))
                 with open(os.path.join("database/METADATA",userID,filename.split("/")[-1]+".txt"),"w") as f:
                     p = Path(filename).stat()
                     modification_date = datetime.datetime.fromtimestamp(int(p.st_mtime))
                     creation_date = datetime.datetime.fromtimestamp(int(p.st_ctime))
                     f.write("%s\n%s\n%s\n%s\n%s\n%s"%(type, size, str(modification_date), str(creation_date),compress,nonce))
+                client.send(self.cr.createMessage(b'0',client_public_key))
 
         else:
             print("unknown")
