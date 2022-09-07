@@ -78,7 +78,7 @@ class ReadSettings():
         with open(".settings","w") as f:
             settings = {}
             settings["download-folder"] = "%s"%os.path.join(os.path.expanduser('~'), "ARCHON Downloads")
-            settings["temp-folder"] = "%s"%tempfile.gettempdir()
+            settings["temp-folder"] = "%s"%os.path.realpath(tempfile.gettempdir())
             settings["storage-limit"] = "None"
             settings["second-storage-limit"] = "None"
             settings["storage-usage-warning"] = {"mode": "per", "value": "100"}
@@ -164,7 +164,7 @@ class Client():
             if response[0]=='0':
                 self.username = username
                 self.authenticated=True
-                os.system("clear")
+                os.system(self.clear)
             else:
                 return response[1:]
 
@@ -283,7 +283,7 @@ class Client():
 
     def compressFile(self,path,basepath, job_id):
         self.updateJob(job_id, status="(1/3) Compressing", progress="0%")
-        tmp='%s/Archon/%s.gz'%(self.settings.settings["temp-folder"],basepath)
+        tmp = os.path.join(self.settings.settings["temp-folder"], "Archon", basepath+".gz")
 
 
         size=os.path.getsize(path)
@@ -319,7 +319,7 @@ class Client():
     ####Encryption
     def encryptFile(self, file, job_id):
         buffer_size=1024
-        tmp_file="%s/Archon/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(file))
+        tmp_file = os.path.join(self.settings.settings["temp-folder"], "Archon", os.path.basename(file)+".arc")
         with open(file, "rb") as f:
             size = os.path.getsize(file)
             with open(tmp_file,"wb") as encrypted_file:
@@ -399,10 +399,10 @@ class Client():
 
             path = os.path.join(self.settings.settings["download-folder"],filename)
 
-            if not os.path.exists(self.settings.settings["temp-folder"]):
-                os.mkdir(self.settings.settings["temp-folder"])
+            if not os.path.exists(os.path.join(self.settings.settings["temp-folder"], "Archon")):
+                os.mkdir(os.path.join(self.settings.settings["temp-folder"], "Archon"))
 
-            tmp_file="%s/Archon/%s.arc"%(self.settings.settings["temp-folder"],os.path.basename(path))
+            tmp_file=os.path.join(self.settings.settings["temp-folder"], "Archon", os.path.basename(path)+".arc")
 
             s.send(self.cr.createMessage(b"0", self.server_public_key))
 
@@ -496,7 +496,7 @@ class Client():
         return file
 
     def getUploadFileOptions(self, file):
-        os.system("clear")
+        os.system(self.clear)
         compress = True
         name = file
         exists = True if self.db.fileExists(os.path.basename(file)) else False
@@ -584,6 +584,9 @@ class Client():
             print("\n[-] Action failed")
             s.close()
             return
+
+        if not os.path.exists(os.path.join(self.settings.settings["temp-folder"], "Archon")):
+            os.mkdir(os.path.join(self.settings.settings["temp-folder"], "Archon"))
 
         if file_type=="FILE":
             if compress:
@@ -687,15 +690,15 @@ class Client():
     def printJobsLoop(self):
         try:
             while self.jobs:
-                os.system("clear")
+                os.system(self.clear)
                 self.printJobs()
                 time.sleep(0.1)
         except KeyboardInterrupt:
-            os.system("clear")
+            os.system(self.clear)
             self.printJobs()
             return
         finally:
-            os.system("clear")
+            os.system(self.clear)
             self.printJobs()
             print("\nNo running commands.")
     ########################
@@ -717,6 +720,8 @@ class Client():
         self.server, self.server_port = server, port
         self.settings = ReadSettings()
         self.authenticated=False
+
+        self.clear = 'cls' if os.name == 'nt' else 'clear'
 
 
         self.jobID=0
