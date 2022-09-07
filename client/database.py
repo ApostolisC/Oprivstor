@@ -8,7 +8,7 @@ class DataBase:
 
         database_exists=os.path.exists(database)
 
-        self.sqliteConnection = sqlite3.connect(database)
+        self.sqliteConnection = sqlite3.connect(database, check_same_thread=False)
 
         self.cursor = self.sqliteConnection.cursor()
 
