@@ -241,7 +241,7 @@ class Server:
             self.H.addLockedFile(item_to_download)
 
             ###########
-            n=os.path.join("database/METADATA",userID,item_to_download.split("/")[-1]+".txt")
+            n=os.path.join("database/METADATA",userID,os.path.basename(item_to_download)+".txt")
             with open(n,"r") as f:
                 f=f.readlines()
 
@@ -272,7 +272,7 @@ class Server:
                 res = self.recvFile(client, filename, int(size))
                 if not res:
                     return
-                with open(os.path.join("database/METADATA",userID,filename.split("/")[-1]+".txt"),"w") as f:
+                with open(os.path.join("database/METADATA",userID,os.path.basename(filename)+".txt"),"w") as f:
                     p = Path(filename).stat()
                     modification_date = datetime.datetime.fromtimestamp(int(p.st_mtime))
                     creation_date = datetime.datetime.fromtimestamp(int(p.st_ctime))
@@ -294,7 +294,7 @@ class Server:
                 client.close()
 
                 os.remove(path)
-                os.remove(os.path.join("database/METADATA",userID,filename.split("/")[-1]+".txt"))
+                os.remove(os.path.join("database/METADATA",userID,os.path.basename(filename)+".txt"))
 
 
         else:
