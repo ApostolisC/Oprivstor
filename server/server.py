@@ -203,6 +203,7 @@ class Server:
                     if os.path.isfile(cpath):
                         self.sendMessage(client, b"", client_public_key)
                         continue
+
                     obj = os.scandir(cpath)
 
                     buffer=b""
@@ -236,12 +237,18 @@ class Server:
 
         #needs check on index
         if command[0] == "DOWNLOAD":
-            item_to_download = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
+            file =  bytes().fromhex(command[1]).decode()
+
+            if os.path.abspath(file) in cpath:
+                client.close()
+                return
+                
+            item_to_download = os.path.abspath(os.path.join(cpath, file))
 
             self.H.addLockedFile(item_to_download)
 
             ###########
-            n=os.path.join("database/METADATA",userID,os.path.basename(item_to_download)+".txt")
+            n=os.path.join("database","METADATA",userID,os.path.basename(item_to_download)+".txt")
             with open(n,"r") as f:
                 f=f.readlines()
 
@@ -260,7 +267,13 @@ class Server:
             #size = command[3]
             type = command[2]
             compress = command[3]
-            filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
+
+            file = bytes().fromhex(command[1]).decode()
+
+            filename = os.path.abspath(os.path.join(cpath,file))
+
+            if filename in cpath: #requested path is below users space
+                return
 
             #client.send(self.cr.createMessage(b"0", client_public_key))
 
@@ -272,7 +285,7 @@ class Server:
                 res = self.recvFile(client, filename, int(size))
                 if not res:
                     return
-                with open(os.path.join("database/METADATA",userID,os.path.basename(filename)+".txt"),"w") as f:
+                with open(os.path.join("database","METADATA",userID,os.path.basename(filename)+".txt"),"w") as f:
                     p = Path(filename).stat()
                     modification_date = datetime.datetime.fromtimestamp(int(p.st_mtime))
                     creation_date = datetime.datetime.fromtimestamp(int(p.st_ctime))
@@ -281,8 +294,8 @@ class Server:
 
         elif command[0]=="DELETE":
                 filename = os.path.abspath(os.path.join(cpath, bytes().fromhex(command[1]).decode()))
-                basepath=os.path.join("database/FILES",userID)
-                path=os.path.join("database/FILES",userID, filename)
+                basepath=os.path.join("database","FILES",userID)
+                path=os.path.join("database","FILES",userID, filename)
                 if not basepath in path:
                     client.send(self.cr.createMessage(b"1Action reported", client_public_key))
                     print("[!] Action to exploit delete command to delete below users path")
@@ -294,7 +307,7 @@ class Server:
                 client.close()
 
                 os.remove(path)
-                os.remove(os.path.join("database/METADATA",userID,os.path.basename(filename)+".txt"))
+                os.remove(os.path.join("database","METADATA",userID,os.path.basename(filename)+".txt"))
 
 
         else:
