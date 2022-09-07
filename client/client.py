@@ -377,7 +377,7 @@ class Client():
                 return
 
 
-            filename, type = file_info[1:3]
+            filename, type = file_info[2:4]
 
 
             command = ("DOWNLOAD %s"%(filename.encode().hex()))
