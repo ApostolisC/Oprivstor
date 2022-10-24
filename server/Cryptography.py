@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.exceptions import InvalidTag
 
+import hashlib
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
@@ -119,10 +120,21 @@ class Cryptography:
             data = self.decompress(data)
         return data
     def createMessage(self, message, public_key, compress=True):
+        h = hashlib.sha1()
+        h.update(message)
+
+        message+=h.hexdigest().encode()
+
+
         if compress:
             message = self.compress(message)
+
+
         enc_message,key,nonce = self.encryptChaCha20Poly1305(message)
+
         metadata = self.encryptMessageRSA(key+nonce, public_key)
+
+
         return enc_message+metadata
 
     def createHash(self, password,salt=None):
