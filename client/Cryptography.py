@@ -10,6 +10,8 @@ from cryptography.exceptions import InvalidTag
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
+import hashlib
+
 import zlib
 import os
 import uuid
@@ -79,8 +81,11 @@ class Cryptography:
         return ct,key,nonce
 
     def decryptChaCha20Poly1305(self,data,key,nonce):
+
+
         chacha = ChaCha20Poly1305(key)
         return chacha.decrypt(nonce, data,b'')
+
 
     def encryptAES_GCM(self,key, iv, data):
         cipher = Cipher(algorithms.AES(key.encode()), modes.GCM(iv))
@@ -94,7 +99,7 @@ class Cryptography:
         try:
             master = decryptor.update(master_passwd) + decryptor.finalize()
         except InvalidTag:
-            return False # wrong user password
+            return False # wrong password
         return master
 
     #### END OF AES METHODS
@@ -117,7 +122,19 @@ class Cryptography:
         data = self.decryptChaCha20Poly1305(encrypted_message,key,nonce)
         if compress:
             data = self.decompress(data)
-        return data
+
+        hash = data[len(data)-40:].decode()
+
+        data = data[0:len(data)-40]
+
+        h = hashlib.sha1()
+        h.update(data)
+
+        if h.hexdigest()==hash:
+            return data
+        else:
+            return False
+
     def createMessage(self, message, public_key, compress=True):
         if compress:
             message = self.compress(message)
@@ -125,8 +142,7 @@ class Cryptography:
         metadata = self.encryptMessageRSA(key+nonce, public_key)
         return enc_message+metadata
 
-    def createHash(self, password,salt=None):
-        if not salt:salt = uuid.uuid4().hex
+    def createHash(self, password):
         ph = PasswordHasher()
         hash = ph.hash(password)
         return hash
