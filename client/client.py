@@ -49,7 +49,7 @@ class FileDialog(QWidget):
 
     def __init__(self, folder=False):
         super().__init__()
-        self.title = 'Archon - File Manager'
+        self.title = '3SF - File Manager'
         self.left = 10
         self.top = 10
         self.width = 1040
@@ -2525,7 +2525,7 @@ class Panel(QDialog):
 
 
 if len(sys.argv[1:])!=2:
-    print("Archon\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
+    print("3SF\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
     sys.exit()
 else:
     try:
