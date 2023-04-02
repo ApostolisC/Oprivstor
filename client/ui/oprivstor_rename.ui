@@ -29,7 +29,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>Archon - Rename File</string>
+   <string>Oprivstor - Rename File</string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <widget class="QLabel" name="error">
