@@ -41,7 +41,7 @@
    <enum>Qt::DefaultContextMenu</enum>
   </property>
   <property name="windowTitle">
-   <string>Archon Upload - Load Settings</string>
+   <string>Oprivstor Upload - Load Settings</string>
   </property>
   <property name="styleSheet">
    <string notr="true"/>
