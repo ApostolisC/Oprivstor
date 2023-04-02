@@ -469,7 +469,7 @@ if len(sys.argv[1:])==2:
 
 elif len(sys.argv)==2:
     if sys.argv[1]=="--help":
-        print("3SF\n\nUsage: python3 %s <address> <port>\n"%sys.argv[0])
+        print("Oprivstor\n\nUsage: python3 %s <address> <port>\n"%sys.argv[0])
     else:
         print("Invalid options. Please use --help option.")
 else:
