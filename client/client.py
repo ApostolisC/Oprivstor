@@ -49,7 +49,7 @@ class FileDialog(QWidget):
 
     def __init__(self, folder=False):
         super().__init__()
-        self.title = '3SF - File Manager'
+        self.title = 'Oprivstor - File Manager'
         self.left = 10
         self.top = 10
         self.width = 1040
@@ -288,7 +288,7 @@ class progressThread(QThread):
                 if not os.path.exists(self.settings["temp-folder"]):
                     os.mkdir(self.settings["temp-folder"])
 
-                tmp_file= os.path.join(self.settings["temp-folder"], "Archon","%s.arc"%os.path.basename(path))
+                tmp_file= os.path.join(self.settings["temp-folder"], "Oprivstor","%s.arc"%os.path.basename(path))
 
                 s.send(self.cr.createMessage(b"0", self.server_public_key))
 
@@ -410,7 +410,7 @@ class UploadFileUI(QMainWindow):
     upload_signal = pyqtSignal(list)
     def __init__(self, directory, filename, exists, files, styles):
         super(UploadFileUI, self).__init__()
-        uic.loadUi(os.path.join("ui","archon_upload.ui"), self)
+        uic.loadUi(os.path.join("ui","oprivstor_upload.ui"), self)
 
         self.setStyleSheet("background-color: %s; color: %s"%(styles["main_background"], styles["main_color"]))
         self.exists_label.setStyleSheet("color:%s"%styles["upload_settings_file_exists"])
@@ -1413,7 +1413,7 @@ class Ui(QMainWindow):
                 except json.decoder.JSONDecodeError:
                     print("Invalid Json Format of style: %s"%os.path.join("styles",style))
 
-        for item in (self.download_folder, os.path.join(self.tmp_folder, "Archon")):
+        for item in (self.download_folder, os.path.join(self.tmp_folder, "Oprivstor")):
             if not os.path.exists(item):
                 try:
                     os.mkdir(item)
