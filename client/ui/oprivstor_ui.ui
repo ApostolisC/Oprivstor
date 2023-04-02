@@ -23,7 +23,7 @@
    <enum>Qt::ClickFocus</enum>
   </property>
   <property name="windowTitle">
-   <string>Archon Secure Online Storage</string>
+   <string>Oprivstor Secure Online Storage</string>
   </property>
   <property name="autoFillBackground">
    <bool>true</bool>
