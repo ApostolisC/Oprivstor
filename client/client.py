@@ -162,7 +162,7 @@ class progressThread(QThread):
     ####Compression
     def compressFile(self,path,basepath):
         self.progress_update.emit(self.id, 0, "Compressing...",[""])
-        tmp='%s/Archon/%s.gz'%(self.settings["temp-folder"],basepath)
+        tmp='%s/Oprivstor/%s.gz'%(self.settings["temp-folder"],basepath)
 
         tmp = self.verifyName(tmp)
 
@@ -195,7 +195,7 @@ class progressThread(QThread):
     def encryptFile(self, file):
         self.progress_update.emit(self.id, 0, "Encrypting...", [""])
         buffer_size=1024
-        tmp_file="%s/Archon/%s.arc"%(self.settings["temp-folder"],os.path.basename(file))
+        tmp_file="%s/Oprivstor/%s.arc"%(self.settings["temp-folder"],os.path.basename(file))
         tmp_file = self.verifyName(tmp_file)
         with open(file, "rb") as f:
             size = os.path.getsize(file)
@@ -520,7 +520,7 @@ class Rename(QMainWindow):
         self.item = item
         self.full_path = os.path.join(parent_path.getFullPath(), item)
 
-        uic.loadUi(os.path.join("ui","archon_rename.ui"), self)
+        uic.loadUi(os.path.join("ui","oprivstor_rename.ui"), self)
         self.setStyles()
 
         self.frame.setVisible(False)
@@ -780,7 +780,7 @@ class Settings(QDialog):
     def __init__(self, username, parent, settings):
         super(Settings, self).__init__()
         self.parent = parent
-        uic.loadUi(os.path.join("ui","archon_settings.ui"), self)
+        uic.loadUi(os.path.join("ui","oprivstor_settings.ui"), self)
 
         self.username_field.setText(username)
 
@@ -962,7 +962,7 @@ class Preferences(QMainWindow):
     def __init__(self, parent):
         if not parent:return
         super(Preferences, self).__init__()
-        uic.loadUi(os.path.join("ui","archon_preferences.ui"), self)
+        uic.loadUi(os.path.join("ui","oprivstor_preferences.ui"), self)
 
         self.parent = parent
 
@@ -1215,7 +1215,7 @@ class Ui(QMainWindow):
         #self.table.setHorizontalHeaderItem(0,item)
 
     def loadUi(self):
-        uic.loadUi(os.path.join("ui","archon_ui.ui"), self)
+        uic.loadUi(os.path.join("ui","oprivstor_ui.ui"), self)
 
 
         qtRectangle = self.frameGeometry()
@@ -1370,7 +1370,7 @@ class Ui(QMainWindow):
     def createDefaultSettings(self):
         with open(".settings","w") as f:
             settings = {}
-            settings["download-folder"] = "%s"%os.path.join(os.path.expanduser('~'), "Archon Downloads")
+            settings["download-folder"] = "%s"%os.path.join(os.path.expanduser('~'), "Oprivstor Downloads")
             settings["temp-folder"] = "%s"%os.path.realpath(tempfile.gettempdir())
             f.write(json.dumps(settings))
 
@@ -1811,7 +1811,6 @@ class Ui(QMainWindow):
 
         file, type = info
         full_path = os.path.join(self.current_path.getFullPath(), file)
-        print("full path:",full_path)
 
         encoded_filename=full_path.encode().hex()
         message = "%s %s DELETE %s"%(self.command_uuid, self.username, encoded_filename)
@@ -1829,7 +1828,6 @@ class Ui(QMainWindow):
             self.showError("Command failed. Lost connection with server.")
             return
 
-        print("got result:",result)
 
         if result[0]=="1":
             self.showError("Action Failed. [Server]: "+result[1:])
@@ -1888,7 +1886,6 @@ class Ui(QMainWindow):
                 if file.name == os.path.basename(name):
                     file.name = new_name
                     self.setEnabled(True)
-        print("done in execute rename item")
 
 
     def openRenameWindow(self, item):
@@ -1962,7 +1959,6 @@ class Ui(QMainWindow):
             full_path=os.path.join(info[0], info[1])
 
         if full_path in progressThread.locked:
-            print("failed")
             return None, None
         new_progress = self.addProgressWidget(info[1], action)
         id=self.job_id
@@ -2369,11 +2365,11 @@ class Panel(QDialog):
         while not client.styles:
             time.sleep(0.1)
 
-        uic.loadUi(os.path.join("ui","archon_login.ui"), self)
+        uic.loadUi(os.path.join("ui","oprivstor_login.ui"), self)
         self.go_button.clicked.connect(self.validateCredentials)
         self.cancel_button.clicked.connect(self.Exit)
-        self.login_button.clicked.connect(lambda: self.changeHeader("Archon Login", "LOGIN"))
-        self.signup_button.clicked.connect(lambda: self.changeHeader("Archon SignUp", "SIGNUP"))
+        self.login_button.clicked.connect(lambda: self.changeHeader("Oprivstor Login", "LOGIN"))
+        self.signup_button.clicked.connect(lambda: self.changeHeader("Oprivstor SignUp", "SIGNUP"))
         self.verify_label.setVisible(False)
         self.password_verify.setVisible(False)
 
@@ -2394,7 +2390,7 @@ class Panel(QDialog):
         self.retry_sec_on_error = 10
         self.exit = False
 
-        self.changeHeader("Archon Login", "LOGIN")
+        self.changeHeader("Oprivstor Login", "LOGIN")
 
         #self.server_message.setPlainText(greeting)
 
@@ -2525,7 +2521,7 @@ class Panel(QDialog):
 
 
 if len(sys.argv[1:])!=2:
-    print("3SF\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
+    print("Pprivstor\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
     sys.exit()
 else:
     try:
