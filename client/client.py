@@ -317,6 +317,7 @@ class progressThread(QThread):
                     path = self.verifyName(path)
                     shutil.move(tmp_file, path)
                     dest = path
+                    os.remove(tmp_file)
                 time.sleep(1)
                 self.progress_update.emit(self.id, 100, "Done", [""])
 
@@ -369,6 +370,8 @@ class progressThread(QThread):
             time.sleep(1)
 
             file_to_upload, nonce = self.encryptFile(file_to_upload)
+            
+            if compress: os.remove(compressed_file)
 
             size = os.path.getsize(file_to_upload)
 
@@ -404,6 +407,7 @@ class progressThread(QThread):
                 print("\n[!] Lost connection. Upload Canceled.")
             finally:
                 self.locked.remove(full_path)
+                os.remove(file_to_upload)
             return
 
 class UploadFileUI(QMainWindow):
