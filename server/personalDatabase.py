@@ -1,6 +1,5 @@
 import os
 import sqlite3
-from pysqlitecipher import sqlitewrapper
 
 class personalDatabase:
 
