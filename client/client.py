@@ -317,8 +317,8 @@ class progressThread(QThread):
                     path = self.verifyName(path)
                     shutil.move(tmp_file, path)
                     dest = path
-                    os.remove(tmp_file)
-                time.sleep(1)
+
+                    time.sleep(1)
                 self.progress_update.emit(self.id, 100, "Done", [""])
 
                 time.sleep(1)
