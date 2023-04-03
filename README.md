@@ -2,10 +2,8 @@
 
 **Introduction**
 
-This project is a client-server application that allows users to upload and download files to and from a data storage server.
-The client is able to securely exchange files with the server using symmetric encryption which ensures that the server has zero access to the client's files. Also, the encryption and decryption process always takes place on the client.
-For the communication between server and client, hybrid encryption is being used to ensure that the communication is secured.
-The client can also choose to compress the file before uploading to reduce its size.
+This particular project is a client-server application that allows the user to upload and download files. The transmission of the data is carried out using hybrid cryptography with message authentication techniques, while the encryption of the files itself is carried out using symmetric cryptography with zero server involvement. Thus, the security of communication is ensured, as well as the confidentiality of the files themselves.
+Finally, the user can specify  lossless compression to be applied before encrypting and sending the file to the server.
 
 **Installation**
 1. Clone the repository from GitHub: `git clone https://github.com/ApostolisC/Oprivstor.git`
