@@ -25,7 +25,7 @@ import platform
 import subprocess
 
 
-def getResponse(socket, cr=None, server_public_key=None, public_key=None, private_key=None, exchange_mode=False, verification=False):
+def getResponse(socket, cr=None, server_public_key=None, private_key=None, exchange_mode=False, verification=False):
     if not exchange_mode:
         r=socket.recv(1024*1024)
         size = cr.decryptMessage(bytes().fromhex(r.decode()), private_key, server_public_key)
@@ -105,7 +105,7 @@ class progressThread(QThread):
 
         server_public_key = self.cr.getPublicFromPEM(self.getResponseFromServer(socket=s, exchange_mode=True))
 
-        s.send(self.cr.createMessage(self.public_pem, server_public_key,self.private_key))
+        s.send(self.cr.createMessage(self.public_pem, server_public_key,self.perm_private))
 
 
         if main_connection:
@@ -124,9 +124,9 @@ class progressThread(QThread):
     def getResponseFromServer(self, socket=False, exchange_mode=False, items=None):
         if not socket: socket = self.s
         if not exchange_mode:
-            return getResponse(socket, self.cr, server_public_key=self.server_public_key, private_key=self.private_key, public_key=self.public_key, exchange_mode=False, verification=None)
+            return getResponse(socket, self.cr, server_public_key=self.server_public_key, private_key=self.private_key, exchange_mode=False, verification=None)
         else:
-            return getResponse(socket, None, None, None, None, True, None)
+            return getResponse(socket, None, None, None, True, None)
 
 
     def verifyName(self, tmp):
@@ -221,7 +221,7 @@ class progressThread(QThread):
         self.command_uuid, \
         self.username, \
         self.server_public_key, \
-        self.public_key, \
+        self.perm_private, \
         self.settings, \
         self.server, \
         self.server_port, \
@@ -271,7 +271,7 @@ class progressThread(QThread):
 
                 tmp_file= os.path.join(self.settings["temp-folder"], "Oprivstor","%s.arc"%os.path.basename(path))
 
-                s.send(self.cr.createMessage(b"0", self.server_public_key,self.private_key))
+                s.send(self.cr.createMessage(b"0", self.server_public_key,self.perm_private))
 
                 t0=time.time()
                 self.progress_update.emit(self.id, 0, "Downloading...", [""])
@@ -361,7 +361,7 @@ class progressThread(QThread):
                 time.sleep(1)
                 self.progress_update.emit(self.id, 0, "Uploading...", [""])
 
-                s.send(self.cr.createMessage(("%s %s"%(str(size), nonce)).encode(),self.server_public_key,self.private_key))
+                s.send(self.cr.createMessage(("%s %s"%(str(size), nonce)).encode(),self.server_public_key,self.perm_private))
 
                 response=self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
                 if response!="0":
@@ -1566,6 +1566,8 @@ class Ui(QMainWindow):
         enc_info = [salt, encrypted_master_passwd, iv, tag, hash, public_pem, encrypted_private_key, nonce]
         enc_info = [v.hex() for v in enc_info]
 
+        self.perm_private = private
+
         return "\n".join(enc_info), master_passwd
 
     def connectToServer(self):
@@ -1629,6 +1631,7 @@ class Ui(QMainWindow):
                 Decrypt Private key
                 """
                 self.perm_private = self.cr.decryptChaCha20Poly1305(private, self.master_passwd, nonce)
+                self.perm_private = self.cr.getPrivateFromPEM(self.perm_private)
                 self.perm_public = public
 
             return self.authenticated
@@ -1739,7 +1742,7 @@ class Ui(QMainWindow):
         else:
             path = node_path.getFullPath()
         command = ("LS %s"%(path.encode().hex())).encode()
-        enc_msg=self.cr.createMessage(command, self.server_public_key,self.private_key)
+        enc_msg=self.cr.createMessage(command, self.server_public_key,self.perm_private)
         self.s.send(enc_msg)
         response = self.cr.decryptMessage(self.getResponseFromServer(self.s),self.private_key, self.server_public_key)
         if not response:
@@ -1985,7 +1988,7 @@ class Ui(QMainWindow):
         self.active_jobs+=1
         self.jobs[id] = new_progress
 
-        extra = [self.command_uuid, self.username, self.server_public_key, self.public_key, self.settings, self.server, self.server_port, self.master_passwd]
+        extra = [self.command_uuid, self.username, self.server_public_key, self.perm_private, self.settings, self.server, self.server_port, self.master_passwd]
         return id, extra
 
     def downloadFile(self, info):
