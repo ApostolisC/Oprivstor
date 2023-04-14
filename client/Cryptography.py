@@ -36,7 +36,7 @@ class Cryptography:
         return private.public_key()
 
     def getPrivateFromPEM(self, pem_data):
-        private_key = serialization.load_pem_private_key(pem_data)
+        private_key = serialization.load_pem_private_key(pem_data, password=None)
         return private_key
 
     def getPublicFromPEM(self, pem_data):
