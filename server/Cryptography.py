@@ -112,6 +112,12 @@ class Cryptography:
         inflated += decompress.flush()
         return inflated
     def decryptMessage(self,message,private,compress=True):
+        message,signature=message.split(b"0x00")
+
+        hasher=hashlib.sha256()
+        hasher.update(message)
+        digest = hasher.digest()
+
         encrypted_message, metadata = message[0:len(message)-256],message[len(message)-256:]
         dmetadata = self.decryptMessageRSA(metadata,private)
         key,nonce = dmetadata[0:32],dmetadata[32:]
@@ -119,7 +125,7 @@ class Cryptography:
         if compress:
             data = self.decompress(data)
         return data
-    def createMessage(self, message, public_key, compress=True):
+    def createMessage(self, message, public_key, private_key, signature_public_key, compress=True):
         h = hashlib.sha1()
         h.update(message)
 
@@ -134,8 +140,15 @@ class Cryptography:
 
         metadata = self.encryptMessageRSA(key+nonce, public_key)
 
+        message = enc_message+metadata
+        hasher=hashlib.sha256()
+        hasher.update(message)
+        digest = hasher.digest()
 
-        return enc_message+metadata
+        signature = private_key.sign(digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH),hashes.SHA256())
+
+
+        return message+b"0x00"+signature
 
     def createHash(self, password,salt=None):
         if not salt:salt = uuid.uuid4().hex
