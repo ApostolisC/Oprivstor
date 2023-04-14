@@ -25,12 +25,12 @@ import platform
 import subprocess
 
 
-def getResponse(socket, cr=None, server_public_key=None, private_key=None, exchange_mode=False, verification=False):
+def getResponse(socket, cr=None, server_public_key=None, public_key=None, private_key=None, exchange_mode=False, verification=False):
     if not exchange_mode:
         r=socket.recv(1024*1024)
-        size = cr.decryptMessage(bytes().fromhex(r.decode()), private_key)
+        size = cr.decryptMessage(bytes().fromhex(r.decode()), private_key, server_public_key)
 
-        to_send = cr.createMessage(b"0", server_public_key)
+        to_send = cr.createMessage(b"0", server_public_key, private_key)
     else:
         size = bytes().fromhex(socket.recv(1024).decode())
         to_send=b"0"
@@ -105,14 +105,14 @@ class progressThread(QThread):
 
         server_public_key = self.cr.getPublicFromPEM(self.getResponseFromServer(socket=s, exchange_mode=True))
 
-        s.send(self.cr.createMessage(self.public_pem, server_public_key))
+        s.send(self.cr.createMessage(self.public_pem, server_public_key,self.private_key))
 
 
         if main_connection:
             self.s=s
             self.server_public_key=server_public_key
 
-            response = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key).decode().split()
+            response = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key, self.server_public_key).decode().split()
 
             self.greeting=' '.join(response[:-1])
             self.command_uuid = response[-1]
@@ -120,33 +120,13 @@ class progressThread(QThread):
         else:
             s.recv(1024)
             return s, server_public_key
-    """def getResponseFromServer(self, socket=False, exchange_mode=False, items=None):
-        if not socket: socket=self.s
-        if not exchange_mode:
-            r=socket.recv(1024*1024)
-            size = self.cr.decryptMessage(bytes().fromhex(r.decode()), self.private_key)
-
-            to_send = self.cr.createMessage(b"0", self.server_public_key)
-        else:
-            size = bytes().fromhex(socket.recv(1024).decode())
-            to_send=b"0"
-        socket.send(to_send)
-        size = int(size.decode())
-        total=0
-        data=b""
-        while total<size:
-            buffer = socket.recv(1024*1024)
-            total+=len(buffer)
-            data+=buffer
-
-        return data"""
 
     def getResponseFromServer(self, socket=False, exchange_mode=False, items=None):
         if not socket: socket = self.s
         if not exchange_mode:
-            return getResponse(socket, self.cr, server_public_key=self.server_public_key, private_key=self.private_key, exchange_mode=False, verification=None)
+            return getResponse(socket, self.cr, server_public_key=self.server_public_key, private_key=self.private_key, public_key=self.public_key, exchange_mode=False, verification=None)
         else:
-            return getResponse(socket, None, None, None, True, None)
+            return getResponse(socket, None, None, None, None, True, None)
 
 
     def verifyName(self, tmp):
@@ -241,6 +221,7 @@ class progressThread(QThread):
         self.command_uuid, \
         self.username, \
         self.server_public_key, \
+        self.public_key, \
         self.settings, \
         self.server, \
         self.server_port, \
@@ -267,14 +248,14 @@ class progressThread(QThread):
 
                 s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-                s.send(self.cr.createMessage(message.encode(), server_public_key))
+                s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
-                result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+                result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
 
                 if result=="1":
                     return
 
-                info = self.cr.decryptMessage(self.getResponseFromServer(s),self.private_key).decode()
+                info = self.cr.decryptMessage(self.getResponseFromServer(s),self.private_key, self.server_public_key).decode()
                 if info[0]=="1":
                     s.close()
                     return
@@ -290,13 +271,13 @@ class progressThread(QThread):
 
                 tmp_file= os.path.join(self.settings["temp-folder"], "Oprivstor","%s.arc"%os.path.basename(path))
 
-                s.send(self.cr.createMessage(b"0", self.server_public_key))
+                s.send(self.cr.createMessage(b"0", self.server_public_key,self.private_key))
 
                 t0=time.time()
                 self.progress_update.emit(self.id, 0, "Downloading...", [""])
                 with open(tmp_file,"wb") as f:
                     total=0
-                    buffer_size = 1024#*1024*8
+                    buffer_size = 1024*32#*1024*8
                     buffer = s.recv(buffer_size)
                     while buffer and total<file_size:
                         total+=len(buffer)
@@ -351,9 +332,9 @@ class progressThread(QThread):
 
             s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-            s.send(self.cr.createMessage(message.encode(), server_public_key))
+            s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
-            result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+            result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
 
 
             if result=="1":
@@ -370,7 +351,7 @@ class progressThread(QThread):
             time.sleep(1)
 
             file_to_upload, nonce = self.encryptFile(file_to_upload)
-            
+
             if compress: os.remove(compressed_file)
 
             size = os.path.getsize(file_to_upload)
@@ -380,21 +361,28 @@ class progressThread(QThread):
                 time.sleep(1)
                 self.progress_update.emit(self.id, 0, "Uploading...", [""])
 
-                s.send(self.cr.createMessage(("%s %s"%(str(size), nonce)).encode(),self.server_public_key))
+                s.send(self.cr.createMessage(("%s %s"%(str(size), nonce)).encode(),self.server_public_key,self.private_key))
 
-                response=self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+                response=self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
                 if response!="0":
                     print(response[1:])
                     return
 
                 with open(file_to_upload, "rb") as f:
-                    buffer_size=1014#*1024*2
-                    while f.tell()<size:
-                        s.sendfile(f,f.tell(),buffer_size)
-                        self.progress_update.emit(self.id, int((f.tell()/size)*100), "", [""])
+                    buffer_size=1014*32#*1024*2
+                    offset=0
+                    while True:
+                        sent=os.sendfile(s.fileno(), f.fileno(),offset,buffer_size)
+                        if sent==0:
+                            break
+                        offset+=sent
+                        self.progress_update.emit(self.id, int((offset/size)*100), "", [""])
 
 
-                metadata = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+#                    while f.tell()<size:
+#                        s.sendfile(f,f.tell(),buffer_size)
+
+                metadata = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
 
 
                 time.sleep(1)
@@ -1209,14 +1197,6 @@ class Ui(QMainWindow):
             item.setForeground(QColor("white"));
             item.setBackground(QColor(self.styles["table"]))
             item.setFont(font)
-        #item.setBackground(QColor("blue"));
-        #item.setData(Qt.BackgroundRole,QBrush(QColor("black")));
-
-
-        #st = "::section{background-color:rgb(190,1,1)}"
-        #item = self.table.horizontalHeaderItem(0)
-        #item.setBackground(QColor("rgb(190,1,1)"))
-        #self.table.setHorizontalHeaderItem(0,item)
 
     def loadUi(self):
         uic.loadUi(os.path.join("ui","oprivstor_ui.ui"), self)
@@ -1457,7 +1437,7 @@ class Ui(QMainWindow):
 
         self.current_path = Node()
 
-        self.panel_status=["", ""]
+        self.panel_status=["", "",False]
 
         self.styles = None
         self.preloadActions()
@@ -1548,7 +1528,24 @@ class Ui(QMainWindow):
             v.setVisible(False)
             self.load_frame.setVisible(False)
 
+    """def encryptMetadata(self, metadata, password=self.master_passwd):
+        output=[]
+        for value in metadata:
+            iv = os.urandom(16)
+            value, tag = self.cr.encryptAES_GCM(value, iv, password)
+            output.append([value, iv, tag])"""
+
+
     def createEncryptedPassword(self, password, master_passwd=None):
+        """
+        Generate RSA keys
+        """
+        private, public,public_pem = self.cr.createRSAKeysWithPem()
+        private_pem = self.cr.getPEMPrivateKey(private)
+
+        """
+        Create master password and ecnrypt with it with users account
+        """
         hash = self.cr.createHash(password).encode()
 
         salt = os.urandom(16)
@@ -1560,11 +1557,14 @@ class Ui(QMainWindow):
 
         encrypted_master_passwd, tag = self.cr.encryptAES_GCM(hashed, iv, master_passwd)
 
-        enc_info = [salt, encrypted_master_passwd, iv, tag, hash]
+
+        """
+        Encrypt Private Key using master password
+        """
+        encrypted_private_key, _ , nonce = self.cr.encryptChaCha20Poly1305(private_pem, key=master_passwd)
+
+        enc_info = [salt, encrypted_master_passwd, iv, tag, hash, public_pem, encrypted_private_key, nonce]
         enc_info = [v.hex() for v in enc_info]
-
-
-
 
         return "\n".join(enc_info), master_passwd
 
@@ -1581,9 +1581,9 @@ class Ui(QMainWindow):
     def LoginPanel(self, username, password, action):
         try:
             command = ("%s %s %s"%(action.upper().encode().hex(),username.encode().hex(),password.encode().hex())).encode()
-            enc_msg=self.cr.createMessage(command, self.server_public_key)
+            enc_msg=self.cr.createMessage(command, self.server_public_key,self.private_key)
             self.s.send(enc_msg)
-            response = self.cr.decryptMessage(self.getResponseFromServer(),self.private_key).decode()
+            response = self.cr.decryptMessage(self.getResponseFromServer(),self.private_key, self.server_public_key).decode()
 
 
             if response[0]=='0':
@@ -1596,26 +1596,40 @@ class Ui(QMainWindow):
             if action=="SIGNUP":
                 message, master_passwd = self.createEncryptedPassword(self.password)
 
-                self.s.send(self.cr.createMessage(message.encode(), self.server_public_key))
+                self.s.send(self.cr.createMessage(message.encode(), self.server_public_key,self.private_key))
 
-                res = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key).decode()
+                res = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key, self.server_public_key).decode()
                 if res=="0":
                     self.master_passwd = master_passwd
                     return self.authenticated
                 return res[1:]
 
             if self.authenticated:
-                self.s.send(self.cr.createMessage(b"0", self.server_public_key))
-                enc_info = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key)
+                self.s.send(self.cr.createMessage(b"0", self.server_public_key,self.private_key))
+                enc_info = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key, self.server_public_key).decode().split()
+
+
+                public, private, nonce = [bytes().fromhex(v) for v in enc_info[1:]]
+
+                enc_info = bytes.fromhex(enc_info[0])
 
                 salt = enc_info[0:16]
                 master_passwd = enc_info[16:48]
                 iv = enc_info[48:64]
                 tag = enc_info[64:80]
 
-
+                """
+                Decrypt master password
+                """
                 hash = hash_password_raw(hash_len=16, password=password.encode(), salt=salt).hex()
                 self.master_passwd = self.cr.decryptAES_GCM(hash,iv,tag,master_passwd)
+
+
+                """
+                Decrypt Private key
+                """
+                self.perm_private = self.cr.decryptChaCha20Poly1305(private, self.master_passwd, nonce)
+                self.perm_public = public
 
             return self.authenticated
 
@@ -1625,7 +1639,7 @@ class Ui(QMainWindow):
     def warmCryptographyEngine(self):
         self.panel_status[0]="Creating Cryptographic Keys"
         self.cr = Cryptography()
-        self.private_key,public_key, self.public_pem = self.cr.createRSAKeysWithPem()
+        self.private_key,self.public_key, self.public_pem = self.cr.createRSAKeysWithPem()
 
     def exchangeKeysWithServer(self, main_connection=True):
         self.panel_status[0]="Connecting to Server"
@@ -1648,14 +1662,21 @@ class Ui(QMainWindow):
 
         server_public_key = self.cr.getPublicFromPEM(self.getResponseFromServer(socket=s, exchange_mode=True))
 
-        s.send(self.cr.createMessage(self.public_pem, server_public_key))
+        s.send(self.cr.createMessage(self.public_pem, server_public_key,self.private_key))
 
 
         if main_connection:
             self.s=s
             self.server_public_key=server_public_key
 
-            response = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key).decode().split()
+            response = self.cr.decryptMessage(self.getResponseFromServer(), self.private_key, self.server_public_key)
+            if not response:
+                self.panel_status[0]="Communication Interrupted"
+                self.panel_status[1]="Failed to validate message!\nTerminating Connection..."
+                self.panel_status[2]=True
+                return
+
+            response=response.decode().split()
 
             self.greeting=' '.join(response[:-1])
             self.panel_status[0]=None
@@ -1669,16 +1690,17 @@ class Ui(QMainWindow):
         if not socket: socket=self.s
         if not exchange_mode:
             r=socket.recv(1024*1024)
-            size = self.cr.decryptMessage(bytes().fromhex(r.decode()), self.private_key)
-            to_send = self.cr.createMessage(b"0", self.server_public_key)
+            size = self.cr.decryptMessage(bytes().fromhex(r.decode()), self.private_key, self.server_public_key)
+            to_send = self.cr.createMessage(b"0", self.server_public_key,self.private_key)
         else:
             size = bytes().fromhex(socket.recv(1024).decode())
             to_send=b"0"
         if size==False:
-            print("Failed to validate message. For security purposes connection is shut down")
+            print("\nFailed to validate message. For security purposes connection is shut down")
             socket.close()
 
             self.close()
+
 
             return False
 
@@ -1693,13 +1715,6 @@ class Ui(QMainWindow):
 
         return data
 
-    """def getResponseFromServer(self, socket=False, exchange_mode=False, verification=False):
-        if not socket: socket = self.s
-        print("socket is:",socket, exchange_mode)
-        if not exchange_mode:
-            return getResponse(socket, self.cr, server_public_key=self.server_public_key, private_key=self.private_key, exchange_mode=False, verification)
-        else:
-            return getResponse(socket, None, None, None, True, verification=False)"""
 
     def changePassword(self, password):
         enc_info, _ = self.createEncryptedPassword(password, self.master_passwd)
@@ -1708,10 +1723,10 @@ class Ui(QMainWindow):
 
         s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-        s.send(self.cr.createMessage(message.encode(), server_public_key))
+        s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
         # result will start with 1 if command uuid is wrong or its right but server already finds the path or an exception happens
-        result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode() # verification of uuid
+        result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode() # verification of uuid
 
         s.close()
         if result[0]=="1":
@@ -1724,9 +1739,9 @@ class Ui(QMainWindow):
         else:
             path = node_path.getFullPath()
         command = ("LS %s"%(path.encode().hex())).encode()
-        enc_msg=self.cr.createMessage(command, self.server_public_key)
+        enc_msg=self.cr.createMessage(command, self.server_public_key,self.private_key)
         self.s.send(enc_msg)
-        response = self.cr.decryptMessage(self.getResponseFromServer(self.s),self.private_key)
+        response = self.cr.decryptMessage(self.getResponseFromServer(self.s),self.private_key, self.server_public_key)
         if not response:
             self.current_path.visited=True
             return
@@ -1822,9 +1837,9 @@ class Ui(QMainWindow):
         try:
             s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-            s.send(self.cr.createMessage(message.encode(), server_public_key))
+            s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
-            result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+            result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
 
             s.close()
         except Exception as e:
@@ -1864,9 +1879,9 @@ class Ui(QMainWindow):
         try:
             s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-            s.send(self.cr.createMessage(message.encode(), server_public_key))
+            s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
-            result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode()
+            result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
 
             s.close()
         except Exception as e:
@@ -1909,10 +1924,10 @@ class Ui(QMainWindow):
 
         s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-        s.send(self.cr.createMessage(message.encode(), server_public_key))
+        s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
         # result will start with 1 if command uuid is wrong or its right but server already finds the path or an exception happens
-        result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode() # verification of uuid
+        result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode() # verification of uuid
 
         s.close()
         if result[0]=="1":
@@ -1970,7 +1985,7 @@ class Ui(QMainWindow):
         self.active_jobs+=1
         self.jobs[id] = new_progress
 
-        extra = [self.command_uuid, self.username, self.server_public_key, self.settings, self.server, self.server_port, self.master_passwd]
+        extra = [self.command_uuid, self.username, self.server_public_key, self.public_key, self.settings, self.server, self.server_port, self.master_passwd]
         return id, extra
 
     def downloadFile(self, info):
@@ -2085,10 +2100,10 @@ class Ui(QMainWindow):
 
         s, server_public_key = self.exchangeKeysWithServer(main_connection=False)
 
-        s.send(self.cr.createMessage(message.encode(), server_public_key))
+        s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
         # result will start with 1 if command uuid is wrong or its right but server already finds the path or an exception happens
-        result = self.cr.decryptMessage(s.recv(1024), self.private_key).decode() # verification of uuid
+        result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode() # verification of uuid
 
         s.close()
         if result[0]=="1":
@@ -2472,6 +2487,7 @@ class Panel(QDialog):
         i=0
         status = self.status[0]
         error = self.status[1]
+        self.exit = self.status[2]
         self.label.setText(status)
         while not self.connected_to_server and not self.exit:
             if self.status[0] is None: break
@@ -2486,6 +2502,18 @@ class Panel(QDialog):
             time.sleep(0.2)
             i+=1
             if i==3: i=0
+
+            self.exit = self.status[2]
+
+        if self.exit:
+            for button in buttons:
+                button.setStyleSheet("background-color:red")
+            self.label.setText(self.status[0])
+            self.error_label.setText(self.status[1])
+            time.sleep(5)
+            self.close()
+            sys.exit()
+
         for v in buttons:
             v.setVisible(False)
 
@@ -2525,7 +2553,7 @@ class Panel(QDialog):
 
 
 if len(sys.argv[1:])!=2:
-    print("Pprivstor\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
+    print("Oprivstor\n\nUsage: python3 %s <server> <port>\n"%sys.argv[0])
     sys.exit()
 else:
     try:
