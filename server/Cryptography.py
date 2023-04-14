@@ -5,7 +5,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-from cryptography.exceptions import InvalidTag
+from cryptography.exceptions import InvalidTag, InvalidSignature
 
 import hashlib
 from argon2 import PasswordHasher
@@ -35,7 +35,7 @@ class Cryptography:
         return private.public_key()
 
     def getPrivateFromPEM(self, pem_data):
-        private_key = serialization.load_pem_private_key(pem_data)
+        private_key = serialization.load_pem_private_key(pem_data, password=None)
         return private_key
 
     def getPublicFromPEM(self, pem_data):
@@ -111,7 +111,7 @@ class Cryptography:
         inflated = decompress.decompress(data)
         inflated += decompress.flush()
         return inflated
-    def decryptMessage(self,message,private,compress=True):
+    def decryptMessage(self,message,private,client_public_key=None, compress=True):
         message,signature=message.split(b"0x00")
 
         hasher=hashlib.sha256()
@@ -124,8 +124,15 @@ class Cryptography:
         data = self.decryptChaCha20Poly1305(encrypted_message,key,nonce)
         if compress:
             data = self.decompress(data)
+
+        if client_public_key:
+            try:
+                client_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
+            except InvalidSignature:
+                return False
+
         return data
-    def createMessage(self, message, public_key, private_key, signature_public_key, compress=True):
+    def createMessage(self, message, public_key, private_key, compress=True):
         h = hashlib.sha1()
         h.update(message)
 
