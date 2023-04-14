@@ -71,8 +71,11 @@ class Handler:
         self.db.deleteUser(name)
 
 
-    def getUserID(self, name):
-        return self.db.getUserSettings(name)[2]
+    def getUserID(self, name, with_public_key=False):
+        info = self.db.getUserSettings(name)
+        if with_public_key:
+            return info[2],info[7]
+        return info[2]
 
     def getMasterPassword(self, name,password):
         data = self.db.getUserSettings(name)
@@ -80,9 +83,9 @@ class Handler:
         authenticated = self.authenticate(data[1],password)
         if not authenticated: return None,None
 
-        salt, master_passwd, iv, tag = data[3:]
+        salt, master_passwd, iv, tag, public_key, private_key, nonce = data[3:]
 
-        return salt+master_passwd+iv+tag,data[2]
+        return [(salt+master_passwd+iv+tag),public_key, private_key, nonce],data[2]
 
     def printDatabase(self):
         self.db.printDatabase()
