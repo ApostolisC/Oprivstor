@@ -628,20 +628,15 @@ border: 1px solid rgb(22,20,28);</string>
     <attribute name="verticalHeaderVisible">
      <bool>false</bool>
     </attribute>
+    <attribute name="verticalHeaderMinimumSectionSize">
+     <number>30</number>
+    </attribute>
     <attribute name="verticalHeaderDefaultSectionSize">
      <number>30</number>
     </attribute>
     <attribute name="verticalHeaderHighlightSections">
      <bool>false</bool>
     </attribute>
-    <attribute name="verticalHeaderMinimumSectionSize">
-     <number>30</number>
-    </attribute>
-    <row>
-     <property name="text">
-      <string/>
-     </property>
-    </row>
     <column>
      <property name="text">
       <string>Name</string>
@@ -672,36 +667,6 @@ border: 1px solid rgb(22,20,28);</string>
       <string>Compressed</string>
      </property>
     </column>
-    <item row="0" column="0">
-     <property name="text">
-      <string>test</string>
-     </property>
-    </item>
-    <item row="0" column="1">
-     <property name="text">
-      <string>test</string>
-     </property>
-    </item>
-    <item row="0" column="2">
-     <property name="text">
-      <string>test</string>
-     </property>
-    </item>
-    <item row="0" column="3">
-     <property name="text">
-      <string>test</string>
-     </property>
-    </item>
-    <item row="0" column="4">
-     <property name="text">
-      <string>test</string>
-     </property>
-    </item>
-    <item row="0" column="5">
-     <property name="text">
-      <string>test</string>
-     </property>
-    </item>
    </widget>
    <widget class="QFrame" name="frame_2">
     <property name="geometry">
@@ -848,7 +813,7 @@ border-radius : 10px;</string>
      <x>0</x>
      <y>0</y>
      <width>970</width>
-     <height>26</height>
+     <height>24</height>
     </rect>
    </property>
    <property name="font">
@@ -881,8 +846,8 @@ border-radius : 10px;</string>
      <rect>
       <x>354</x>
       <y>273</y>
-      <width>145</width>
-      <height>116</height>
+      <width>173</width>
+      <height>135</height>
      </rect>
     </property>
     <property name="minimumSize">
