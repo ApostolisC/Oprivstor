@@ -1,11 +1,11 @@
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-from cryptography.exceptions import InvalidTag
+from cryptography.exceptions import InvalidTag, InvalidSignature
+
+
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -72,8 +72,9 @@ class Cryptography:
         chacha = ChaCha20Poly1305(key)
         return chacha.decrypt(nonce, data,b'')
 
-    def encryptChaCha20Poly1305(self,data):
-        key = ChaCha20Poly1305.generate_key()
+    def encryptChaCha20Poly1305(self,data, key=None):
+        if not key:
+            key = ChaCha20Poly1305.generate_key()
         chacha = ChaCha20Poly1305(key)
         nonce = os.urandom(12)
         ct = chacha.encrypt(nonce, data,b'')
@@ -81,8 +82,6 @@ class Cryptography:
         return ct,key,nonce
 
     def decryptChaCha20Poly1305(self,data,key,nonce):
-
-
         chacha = ChaCha20Poly1305(key)
         return chacha.decrypt(nonce, data,b'')
 
@@ -93,14 +92,14 @@ class Cryptography:
         ct = encryptor.update(data)+encryptor.finalize()
 
         return (ct,encryptor.tag)
-    def decryptAES_GCM(self, hash, iv,tag,master_passwd):
-        cipher = Cipher(algorithms.AES(hash.encode()), modes.GCM(iv,tag))
+    def decryptAES_GCM(self, key, iv,tag,data):
+        cipher = Cipher(algorithms.AES(key.encode()), modes.GCM(iv,tag))
         decryptor = cipher.decryptor()
         try:
-            master = decryptor.update(master_passwd) + decryptor.finalize()
+            decrypted = decryptor.update(data) + decryptor.finalize()
         except InvalidTag:
-            return False # wrong password
-        return master
+            return False # wrong password or tampered data
+        return decrypted
 
     #### END OF AES METHODS
     ###############################
@@ -115,7 +114,15 @@ class Cryptography:
         inflated = decompress.decompress(data)
         inflated += decompress.flush()
         return inflated
-    def decryptMessage(self,message,private,compress=True):
+    def decryptMessage(self,message,private, server_public_key, compress=True):
+        if not message:return False
+        message,signature=message.split(b"0x00")
+
+        hasher=hashlib.sha256()
+        hasher.update(message)
+        digest = hasher.digest()
+
+
         encrypted_message, metadata = message[0:len(message)-256],message[len(message)-256:]
         dmetadata = self.decryptMessageRSA(metadata,private)
         key,nonce = dmetadata[0:32],dmetadata[32:]
@@ -131,16 +138,31 @@ class Cryptography:
         h.update(data)
 
         if h.hexdigest()==hash:
+
+            try:
+                server_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
+            except InvalidSignature:
+                return False
+
             return data
         else:
             return False
 
-    def createMessage(self, message, public_key, compress=True):
+    def createMessage(self, message, public_key, private_key,compress=True):
         if compress:
             message = self.compress(message)
         enc_message,key,nonce = self.encryptChaCha20Poly1305(message)
         metadata = self.encryptMessageRSA(key+nonce, public_key)
-        return enc_message+metadata
+
+        message = enc_message+metadata
+        hasher=hashlib.sha256()
+        hasher.update(message)
+        digest = hasher.digest()
+
+        signature = private_key.sign(digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH),hashes.SHA256())
+
+
+        return message+b"0x00"+signature
 
     def createHash(self, password):
         ph = PasswordHasher()
