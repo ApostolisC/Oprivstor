@@ -29,7 +29,10 @@ class DataBase:
                         SALT    VARCHAR(16),
                         MASTER_PASSWORD  VARCHAR(32),
                         IV  VARCHAR(16),
-                        TAG VARCHAR(16)
+                        TAG VARCHAR(16),
+                        PUBLIC_KEY  VARCHAR(4096),
+                        PRIVATE_KEY VARCHAR(4096),
+                        NONCE VARCHAR(16)
 
                     ); """
         query2 = """CREATE TABLE SESSIONS (
@@ -74,7 +77,7 @@ class DataBase:
         self.sqliteConnection.commit()
 
     def addUserToDatabase(self, s):
-        self.cursor.execute("INSERT INTO USERS VALUES (?,?,?, ?, ?, ?, ?);",(s[0],s[1],s[2],s[3],s[4],s[5],s[6],))
+        self.cursor.execute("INSERT INTO USERS VALUES (?,?,?, ?, ?, ?, ?, ?, ?, ?);",(s[0],s[1],s[2],s[3],s[4],s[5],s[6], s[7], s[8], s[9],))
         self.cursor.execute("INSERT INTO SESSIONS VALUES (?,null);",(s[0],))
         self.sqliteConnection.commit()
 
@@ -92,7 +95,6 @@ class DataBase:
 
     def passwordResetProtocol(self,id, settings):
         try:
-            print(settings[0],settings[1],settings[2],settings[3],settings[4])
             self.cursor.execute("UPDATE USERS SET HASH=?, SALT=?, MASTER_PASSWORD=?, IV=?, TAG=? WHERE ID=?",(settings[0],settings[1],settings[2],settings[3],settings[4],id,))
 
             #self.cursor.execute("DELETE FROM CATALOG WHERE USER=?;",(name,))
