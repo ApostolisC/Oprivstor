@@ -358,11 +358,8 @@ class Server:
         elif command[0]=="CHPASSWD":
             enc_info="\n".join(command[1:])
 
-            salt, encrypted_master_passwd, iv, tag, hash = enc_info.splitlines()
-
-
-            info = [hash, salt, encrypted_master_passwd,iv,tag]
-            info = [bytes().fromhex(v) for v in info]
+            info = [bytes().fromhex(v) for v in enc_info.splitlines()]
+            
             result = self.H.updateUserPassword(userID, info)
             if result:
                 client.send(self.cr.createMessage(b"0",client_public_key, self.private_key))
