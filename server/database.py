@@ -95,9 +95,7 @@ class DataBase:
 
     def passwordResetProtocol(self,id, settings):
         try:
-            self.cursor.execute("UPDATE USERS SET HASH=?, SALT=?, MASTER_PASSWORD=?, IV=?, TAG=? WHERE ID=?",(settings[0],settings[1],settings[2],settings[3],settings[4],id,))
-
-            #self.cursor.execute("DELETE FROM CATALOG WHERE USER=?;",(name,))
+            self.cursor.execute("UPDATE USERS SET HASH=?, SALT=?, MASTER_PASSWORD=?, IV=?, TAG=?, PUBLIC_KEY=?, PRIVATE_KEY=?, NONCE=? WHERE ID=?",(settings[4],settings[0],settings[1],settings[2],settings[3],settings[5],settings[6],settings[7], id,))
             self.sqliteConnection.commit()
             return True
         except Exception as e:
