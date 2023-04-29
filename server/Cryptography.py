@@ -122,29 +122,34 @@ class Cryptography:
         dmetadata = self.decryptMessageRSA(metadata,private)
         key,nonce = dmetadata[0:32],dmetadata[32:]
         data = self.decryptChaCha20Poly1305(encrypted_message,key,nonce)
-        if compress:
-            data = self.decompress(data)
+
+
 
         if client_public_key:
+            hash = data[-64:].decode()
+            data = data[:-64]
+
+            h = hashlib.sha256()
+            h.update(data)
+            if hash!=h.hexdigest():
+                return False
+            data = self.decompress(data)
             try:
                 client_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
             except InvalidSignature:
                 return False
-
+        else:
+            data = self.decompress(data)
         return data
     def createMessage(self, message, public_key, private_key, compress=True):
-        h = hashlib.sha1()
+        message = self.compress(message)
+
+        h = hashlib.sha256()
         h.update(message)
 
         message+=h.hexdigest().encode()
 
-
-        if compress:
-            message = self.compress(message)
-
-
         enc_message,key,nonce = self.encryptChaCha20Poly1305(message)
-
         metadata = self.encryptMessageRSA(key+nonce, public_key)
 
         message = enc_message+metadata
