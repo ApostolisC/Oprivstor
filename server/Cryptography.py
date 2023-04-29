@@ -118,12 +118,16 @@ class Cryptography:
         hasher.update(message)
         digest = hasher.digest()
 
+        if client_public_key:
+            try:
+                client_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
+            except InvalidSignature:
+                return False
+
         encrypted_message, metadata = message[0:len(message)-256],message[len(message)-256:]
         dmetadata = self.decryptMessageRSA(metadata,private)
         key,nonce = dmetadata[0:32],dmetadata[32:]
         data = self.decryptChaCha20Poly1305(encrypted_message,key,nonce)
-
-
 
         if client_public_key:
             hash = data[-64:].decode()
@@ -134,10 +138,7 @@ class Cryptography:
             if hash!=h.hexdigest():
                 return False
             data = self.decompress(data)
-            try:
-                client_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-            except InvalidSignature:
-                return False
+
         else:
             data = self.decompress(data)
         return data
