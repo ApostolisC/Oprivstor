@@ -104,7 +104,8 @@ class Server:
         else:
             client.send(self.cr.createMessage(b"0", client_public_key, self.private_key))
         ##########################################
-            data = self.cr.decryptMessage(client.recv(1024), self.private_key, client_public_key).decode().split()
+            data=client.recv(1024*1024)
+            data = self.cr.decryptMessage(data, self.private_key, client_public_key).decode().split()
             command_uuid = data[0]
             username = data[1]
             command = data[2:]
@@ -359,7 +360,7 @@ class Server:
             enc_info="\n".join(command[1:])
 
             info = [bytes().fromhex(v) for v in enc_info.splitlines()]
-            
+
             result = self.H.updateUserPassword(userID, info)
             if result:
                 client.send(self.cr.createMessage(b"0",client_public_key, self.private_key))
