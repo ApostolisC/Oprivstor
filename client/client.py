@@ -131,13 +131,22 @@ class progressThread(QThread):
 
     def verifyName(self, tmp):
         name = tmp.split(".", maxsplit=1)
-        ext = name[-1]
-        name = ".".join(name[:-1])+"  "
-        i=2
-        while os.path.exists(tmp):
-            name=name[:-len(str(i-1))-1]+"_"+str(i)
-            tmp=name+"."+ext
-            i+=1
+        if len(name)==1:
+            i=2
+            while os.path.exists(tmp):
+                tmp = "%s(%d)"%(tmp,i)
+                i+=1
+
+        else:
+            ext = name[-1]
+            name = ".".join(name[:-1])+"  "
+            i=2
+            while os.path.exists(tmp):
+                name=name[:-len(str(i-1))-1]+"("+str(i)+")"
+                tmp=name+"."+ext
+                i+=1
+
+
         return tmp
     ####Compression
     def compressFile(self,path,basepath):
@@ -1729,7 +1738,7 @@ class Ui(QMainWindow):
         s.send(self.cr.createMessage(message.encode(), server_public_key,self.private_key))
 
         # result will start with 1 if command uuid is wrong or its right but server already finds the path or an exception happens
-        result = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode() # verification of uuid
+        result = self.cr.decryptMessage(s.recv(1024*8), self.private_key, self.server_public_key).decode() # verification of uuid
 
         s.close()
         if result[0]=="1":
