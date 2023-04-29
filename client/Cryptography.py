@@ -115,42 +115,46 @@ class Cryptography:
         inflated += decompress.flush()
         return inflated
     def decryptMessage(self,message,private, server_public_key, compress=True):
-        if not message:return False
         message,signature=message.split(b"0x00")
 
         hasher=hashlib.sha256()
         hasher.update(message)
         digest = hasher.digest()
 
-
         encrypted_message, metadata = message[0:len(message)-256],message[len(message)-256:]
         dmetadata = self.decryptMessageRSA(metadata,private)
         key,nonce = dmetadata[0:32],dmetadata[32:]
         data = self.decryptChaCha20Poly1305(encrypted_message,key,nonce)
-        if compress:
-            data = self.decompress(data)
 
-        hash = data[len(data)-40:].decode()
 
-        data = data[0:len(data)-40]
+        hash = data[-64:].decode()
+        data = data[:-64]
 
-        h = hashlib.sha1()
+        h = hashlib.sha256()
         h.update(data)
-
-        if h.hexdigest()==hash:
-
-            try:
-                server_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-            except InvalidSignature:
-                return False
-
-            return data
-        else:
+        if hash!=h.hexdigest():
             return False
+        data = self.decompress(data)
+        try:
+            server_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
+        except InvalidSignature:
+            return False
+
+
+        return data
 
     def createMessage(self, message, public_key, private_key,compress=True):
         if compress:
             message = self.compress(message)
+
+
+        h = hashlib.sha256()
+        h.update(message)
+
+        message+=h.hexdigest().encode()
+
+
+
         enc_message,key,nonce = self.encryptChaCha20Poly1305(message)
         metadata = self.encryptMessageRSA(key+nonce, public_key)
 
