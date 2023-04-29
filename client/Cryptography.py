@@ -121,6 +121,11 @@ class Cryptography:
         hasher.update(message)
         digest = hasher.digest()
 
+        try:
+            server_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
+        except InvalidSignature:
+            return False
+
         encrypted_message, metadata = message[0:len(message)-256],message[len(message)-256:]
         dmetadata = self.decryptMessageRSA(metadata,private)
         key,nonce = dmetadata[0:32],dmetadata[32:]
@@ -135,11 +140,6 @@ class Cryptography:
         if hash!=h.hexdigest():
             return False
         data = self.decompress(data)
-        try:
-            server_public_key.verify(signature, digest, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-        except InvalidSignature:
-            return False
-
 
         return data
 
