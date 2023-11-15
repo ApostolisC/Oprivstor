@@ -381,15 +381,12 @@ class progressThread(QThread):
                     buffer_size=1014*32#*1024*2
                     offset=0
                     while True:
-                        sent=os.sendfile(s.fileno(), f.fileno(),offset,buffer_size)
+                        sent=s.sendfile(f, offset=offset, count=buffer_size)
                         if sent==0:
                             break
                         offset+=sent
                         self.progress_update.emit(self.id, int((offset/size)*100), "", [""])
 
-
-#                    while f.tell()<size:
-#                        s.sendfile(f,f.tell(),buffer_size)
 
                 metadata = self.cr.decryptMessage(s.recv(1024), self.private_key, self.server_public_key).decode()
 
