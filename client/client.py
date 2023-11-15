@@ -780,6 +780,13 @@ class Settings(QDialog):
         self.parent = parent
         uic.loadUi(os.path.join("ui","oprivstor_settings.ui"), self)
 
+        self.tabs = self.findChild(QTabWidget, 'tabWidget')
+
+        # Check if the QTabWidget was found
+        if self.tabs:
+            # Set the background color using a stylesheet
+            self.tabs.setStyleSheet("QTabBar::tab:selected { background-color: %s; } QTabBar::tab:!selected { background-color: %s; }"%(parent.styles["table_selection"], parent.styles["table"]))
+
         self.username_field.setText(username)
 
         self.change_password_button.clicked.connect(self.changePassword)
